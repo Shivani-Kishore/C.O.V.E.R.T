@@ -1,0 +1,112 @@
+# C.O.V.E.R.T - Git Ignore File
+
+# ===== Project Status =====
+PROJECT_STATUS.md
+
+# ===== Frontend =====
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+frontend/.env
+frontend/.env.local
+frontend/.env.development
+frontend/.env.production
+frontend/coverage/
+frontend/.DS_Store
+frontend/*.log
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# ===== Backend =====
+backend/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+backend/.env
+backend/.env.local
+backend/.env.development
+backend/.env.production
+backend/venv/
+backend/env/
+backend/.venv/
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+backend/*.db
+backend/*.sqlite
+backend/*.log
+backend/celerybeat-schedule
+
+# ===== Smart Contracts =====
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+contracts/lib/
+contracts/.env
+contracts/.env.local
+contracts/deployments/
+contracts/coverage/
+
+# ===== IPFS =====
+ipfs_data/
+.ipfs/
+
+# ===== Database =====
+postgres_data/
+*.sql
+*.dump
+
+# ===== Redis =====
+redis_data/
+
+# ===== Docker =====
+docker-compose.override.yml
+.docker/
+
+# ===== IDE =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ===== System =====
+Thumbs.db
+*.tmp
+*.bak
+
+# ===== Secrets & Keys =====
+*.pem
+*.key
+*.env.production
+secrets/
+private_keys/
+
+# ===== Logs =====
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# ===== Test Coverage =====
+coverage/
+.nyc_output/
+*.lcov
+
+# ===== Build Artifacts =====
+dist/
+build/
+*.tsbuildinfo
+
+# ===== OS =====
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
