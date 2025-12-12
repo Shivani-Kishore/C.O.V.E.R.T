@@ -8,6 +8,8 @@ import { AppLayout } from './components/layout/AppLayout';
 import { ReporterDashboard } from './pages/ReporterDashboard';
 import { SubmitReport } from './pages/SubmitReport';
 import { MySubmissions } from './components/reporter/MySubmissions';
+import { ModeratorDashboard } from './pages/ModeratorDashboard';
+import { ModerationQueue } from './components/moderator/ModerationQueue';
 
 function App() {
   return (
@@ -31,6 +33,10 @@ function App() {
           <Route path="/dashboard" element={<ReporterDashboard />} />
           <Route path="/submit" element={<SubmitReport />} />
           <Route path="/my-reports" element={<MySubmissions />} />
+
+          {/* Moderator routes */}
+          <Route path="/moderation" element={<ModeratorDashboard />} />
+          <Route path="/moderation/queue" element={<ModerationQueue />} />
         </Route>
 
         {/* 404 fallback */}

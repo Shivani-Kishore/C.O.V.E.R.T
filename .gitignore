@@ -1,7 +1,12 @@
 # C.O.V.E.R.T - Git Ignore File
 
-# ===== Project Status =====
+# ===== Project Status and Setup Documentation =====
 PROJECT_STATUS.md
+SETUP_GUIDE.md
+SETUP_INSTRUCTIONS.md
+
+# ===== Claude Progress Files =====
+.claude_progress/
 
 # ===== Frontend =====
 frontend/node_modules/

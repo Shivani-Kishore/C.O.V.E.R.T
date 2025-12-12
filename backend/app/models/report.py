@@ -185,6 +185,11 @@ class Report(Base):
         back_populates="report",
         cascade="all, delete-orphan"
     )
+    zkp_nullifier = relationship(
+        "ZKPNullifier",
+        back_populates="report",
+        uselist=False
+    )
 
     # Table constraints
     __table_args__ = (
@@ -436,6 +441,9 @@ class ZKPNullifier(Base):
         UUID(as_uuid=True),
         ForeignKey("reports.id", ondelete="SET NULL")
     )
+
+    # Relationships
+    report = relationship("Report", back_populates="zkp_nullifier")
 
     def __repr__(self):
         return f"<ZKPNullifier {self.id}>"
