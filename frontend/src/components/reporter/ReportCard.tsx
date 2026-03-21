@@ -13,6 +13,7 @@ import {
   XCircleIcon,
   EyeIcon,
   EyeSlashIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
 import type { Report, ReportStatus, ReportVisibility, ReportCategory } from '@/stores/reportStore';
 
@@ -20,32 +21,34 @@ interface ReportCardProps {
   report: Report;
   onClick?: () => void;
   compact?: boolean;
+  onDelete?: (id: string) => void;
+  onAppeal?: (report: Report) => void;
 }
 
 const statusConfig: Record<ReportStatus, { label: string; color: string; icon: React.ElementType }> = {
   pending: {
     label: 'Pending',
-    color: 'bg-yellow-100 text-yellow-800',
+    color: 'bg-yellow-900/40 text-yellow-400',
     icon: ClockIcon,
   },
   under_review: {
     label: 'Under Review',
-    color: 'bg-blue-100 text-blue-800',
+    color: 'bg-blue-900/40 text-blue-400',
     icon: EyeIcon,
   },
   verified: {
     label: 'Verified',
-    color: 'bg-green-100 text-green-800',
+    color: 'bg-green-900/40 text-green-400',
     icon: CheckCircleIcon,
   },
   rejected: {
     label: 'Rejected',
-    color: 'bg-red-100 text-red-800',
+    color: 'bg-red-900/40 text-red-400',
     icon: XCircleIcon,
   },
   disputed: {
     label: 'Disputed',
-    color: 'bg-orange-100 text-orange-800',
+    color: 'bg-orange-900/40 text-orange-400',
     icon: ExclamationTriangleIcon,
   },
 };
@@ -89,6 +92,8 @@ export const ReportCard = memo(function ReportCard({
   report,
   onClick,
   compact = false,
+  onDelete,
+  onAppeal,
 }: ReportCardProps) {
   const navigate = useNavigate();
 
@@ -105,37 +110,48 @@ export const ReportCard = memo(function ReportCard({
     }
   }, [onClick, navigate, report.id]);
 
-  const statusInfo = statusConfig[report.status];
+  const statusInfo = statusConfig[report.status] ?? {
+    label: report.status ?? 'Unknown',
+    color: 'bg-neutral-800 text-neutral-400',
+    icon: ClockIcon,
+  };
   const StatusIcon = statusInfo.icon;
-  const VisibilityIcon = visibilityConfig[report.visibility].icon;
+  const visibilityInfo = visibilityConfig[report.visibility] ?? { label: report.visibility ?? 'Unknown', icon: EyeIcon };
+  const VisibilityIcon = visibilityInfo.icon;
+  const categoryLabel = categoryLabels[report.category] ?? report.category ?? 'Unknown';
 
   if (compact) {
     return (
       <div
         onClick={handleClick}
-        className="flex items-center justify-between p-4 bg-white border border-neutral-200 rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+        className="flex items-center justify-between p-4 bg-neutral-950 border border-neutral-800 rounded-xl hover:border-neutral-600 transition-all cursor-pointer"
       >
         <div className="flex items-center space-x-4">
           <div className={`flex items-center px-2 py-1 rounded-full text-xs font-medium ${statusInfo.color}`}>
             <StatusIcon className="h-3 w-3 mr-1" />
             {statusInfo.label}
           </div>
-          <span className="text-sm text-neutral-600">
-            {categoryLabels[report.category]}
-          </span>
           <span className="text-sm text-neutral-400">
+            {categoryLabel}
+          </span>
+          <span className="text-sm text-neutral-500">
             {formattedDate}
           </span>
         </div>
-        <ChevronRightIcon className="h-5 w-5 text-neutral-400" />
+        <ChevronRightIcon className="h-5 w-5 text-neutral-600" />
       </div>
     );
   }
 
+  const handleDeleteClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onDelete) onDelete(report.id);
+  }, [onDelete, report.id]);
+
   return (
     <div
       onClick={handleClick}
-      className="bg-white rounded-lg border border-neutral-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer p-6"
+      className="rounded-2xl border border-neutral-800 bg-neutral-950 hover:border-neutral-600 transition-all cursor-pointer p-6"
     >
       <div className="flex justify-between items-start mb-4">
         <div className="flex-1">
@@ -145,46 +161,56 @@ export const ReportCard = memo(function ReportCard({
               <StatusIcon className="h-3 w-3 mr-1" />
               {statusInfo.label}
             </span>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100 text-neutral-700">
-              {categoryLabels[report.category]}
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-800 text-neutral-400">
+              {categoryLabel}
             </span>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-50 text-neutral-600">
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-800 text-neutral-500">
               <VisibilityIcon className="h-3 w-3 mr-1" />
-              {visibilityConfig[report.visibility].label}
+              {visibilityInfo.label}
             </span>
           </div>
 
           {/* Report ID/Title */}
-          <h3 className="text-lg font-semibold text-neutral-900 mb-1">
+          <h3 className="text-lg font-semibold text-white mb-1">
             {report.title || `Report #${report.id.slice(0, 8)}`}
           </h3>
 
           {/* Submission Info */}
-          <p className="text-sm text-neutral-600">
+          <p className="text-sm text-neutral-500">
             Submitted {formattedDate} &bull; {formatFileSize(report.fileSize)}
           </p>
         </div>
 
-        {/* Verification Score */}
-        {report.verificationScore !== undefined && (
-          <div className="flex flex-col items-end ml-4">
-            <span className="text-sm text-neutral-600">Credibility</span>
-            <span className={`text-2xl font-bold ${
-              report.verificationScore >= 0.7
-                ? 'text-green-600'
+        {/* Verification Score + Delete */}
+        <div className="flex items-start gap-3 ml-4">
+          {report.verificationScore !== undefined && (
+            <div className="flex flex-col items-end">
+              <span className="text-sm text-neutral-500">Credibility</span>
+              <span className={`text-2xl font-bold ${report.verificationScore >= 0.7
+                ? 'text-green-400'
                 : report.verificationScore >= 0.4
-                  ? 'text-yellow-600'
-                  : 'text-red-600'
-            }`}>
-              {(report.verificationScore * 100).toFixed(0)}%
-            </span>
-          </div>
-        )}
+                  ? 'text-yellow-400'
+                  : 'text-red-400'
+                }`}>
+                {(report.verificationScore * 100).toFixed(0)}%
+              </span>
+            </div>
+          )}
+          {onDelete && (
+            <button
+              onClick={handleDeleteClick}
+              className="p-1.5 rounded-lg border border-neutral-800 text-neutral-600 hover:border-neutral-600 hover:text-white transition-colors"
+              title="Delete report"
+            >
+              <TrashIcon className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Transaction Info */}
-      <div className="flex items-center justify-between pt-4 border-t border-neutral-200">
-        <div className="flex items-center text-sm text-neutral-600">
+      <div className="flex items-center justify-between pt-4 border-t border-neutral-800">
+        <div className="flex items-center text-sm text-neutral-500">
           <ShieldCheckIcon className="h-4 w-4 mr-1 text-green-500" />
           <span>On-chain verified</span>
           <span className="mx-2">&bull;</span>
@@ -193,18 +219,32 @@ export const ReportCard = memo(function ReportCard({
           </span>
         </div>
 
-        <ChevronRightIcon className="h-5 w-5 text-neutral-400" />
+        <div className="flex items-center gap-2">
+          {onAppeal && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onAppeal(report); }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-orange-900/30 text-orange-400 border border-orange-800/50 hover:border-orange-600 hover:bg-orange-900/50 transition-all"
+            >
+              Appeal (8 COV)
+            </button>
+          )}
+          {report.hasAppeal && (
+            <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-purple-900/30 text-purple-400 border border-purple-800/50">
+              Appealed
+            </span>
+          )}
+          <ChevronRightIcon className="h-5 w-5 text-neutral-600" />
+        </div>
       </div>
 
       {/* Risk Level Badge */}
       {report.riskLevel && (
         <div className="mt-3">
-          <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-            report.riskLevel === 'critical' ? 'bg-red-100 text-red-800' :
-            report.riskLevel === 'high' ? 'bg-orange-100 text-orange-800' :
-            report.riskLevel === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-            'bg-green-100 text-green-800'
-          }`}>
+          <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${report.riskLevel === 'critical' ? 'bg-red-900/40 text-red-400' :
+            report.riskLevel === 'high' ? 'bg-orange-900/40 text-orange-400' :
+              report.riskLevel === 'medium' ? 'bg-yellow-900/40 text-yellow-400' :
+                'bg-green-900/40 text-green-400'
+            }`}>
             <ExclamationTriangleIcon className="h-3 w-3 mr-1" />
             {report.riskLevel.charAt(0).toUpperCase() + report.riskLevel.slice(1)} Risk
           </span>

@@ -51,7 +51,7 @@ class EncryptionService implements IEncryptionService {
       // Import key for encryption
       const cryptoKey = await crypto.subtle.importKey(
         'raw',
-        key,
+        key as Uint8Array<ArrayBuffer>,
         { name: 'AES-GCM', length: this.keySize },
         false,
         ['encrypt']
@@ -62,11 +62,11 @@ class EncryptionService implements IEncryptionService {
       const ciphertext = await crypto.subtle.encrypt(
         {
           name: 'AES-GCM',
-          iv: iv,
+          iv: iv as Uint8Array<ArrayBuffer>,
           tagLength: 128, // 16 bytes auth tag
         },
         cryptoKey,
-        encodedData
+        encodedData as Uint8Array<ArrayBuffer>
       );
 
       // AES-GCM includes the auth tag at the end of ciphertext
@@ -96,7 +96,7 @@ class EncryptionService implements IEncryptionService {
       // Import key for decryption
       const cryptoKey = await crypto.subtle.importKey(
         'raw',
-        key,
+        key as Uint8Array<ArrayBuffer>,
         { name: 'AES-GCM', length: this.keySize },
         false,
         ['decrypt']
@@ -106,11 +106,11 @@ class EncryptionService implements IEncryptionService {
       const plaintext = await crypto.subtle.decrypt(
         {
           name: 'AES-GCM',
-          iv: iv,
+          iv: iv as Uint8Array<ArrayBuffer>,
           tagLength: 128,
         },
         cryptoKey,
-        ciphertext
+        ciphertext as Uint8Array<ArrayBuffer>
       );
 
       return new TextDecoder().decode(plaintext);
@@ -127,7 +127,7 @@ class EncryptionService implements IEncryptionService {
       // Import password as key material
       const keyMaterial = await crypto.subtle.importKey(
         'raw',
-        new TextEncoder().encode(password),
+        new TextEncoder().encode(password) as Uint8Array<ArrayBuffer>,
         'PBKDF2',
         false,
         ['deriveBits']
@@ -137,7 +137,7 @@ class EncryptionService implements IEncryptionService {
       const derivedBits = await crypto.subtle.deriveBits(
         {
           name: 'PBKDF2',
-          salt: salt,
+          salt: salt as Uint8Array<ArrayBuffer>,
           iterations: this.pbkdf2Iterations,
           hash: 'SHA-256',
         },
@@ -200,48 +200,53 @@ class EncryptionService implements IEncryptionService {
   async encryptReport(
     formData: ReportFormData
   ): Promise<{ blob: EncryptedReportBlob; key: Uint8Array }> {
-    // Generate encryption key
-    const key = await this.generateKey();
+    try {
+      // Generate encryption key
+      const key = await this.generateKey();
 
-    // Process file attachments
-    const attachments: DecryptedAttachment[] = await Promise.all(
-      formData.files.map(async (file) => ({
-        filename: file.name,
-        mimeType: file.type,
-        size: file.size,
-        content: await this.fileToBase64(file),
-      }))
-    );
+      // Process file attachments
+      const attachments: DecryptedAttachment[] = await Promise.all(
+        formData.files.map(async (file) => ({
+          filename: file.name,
+          mimeType: file.type,
+          size: file.size,
+          content: await this.fileToBase64(file),
+        }))
+      );
 
-    // Create report data structure
-    const reportData: DecryptedReportData = {
-      title: formData.title,
-      category: formData.category,
-      description: formData.description,
-      timestamp: createFuzzyTimestamp(),
-      attachments,
-    };
-
-    // Serialize and pad the data
-    const serialized = JSON.stringify(reportData);
-    const paddedData = this.padData(serialized);
-
-    // Encrypt the padded data
-    const encryptedPayload = await this.encrypt(paddedData, key);
-
-    // Create the encrypted blob
-    const blob: EncryptedReportBlob = {
-      version: ENCRYPTION_DEFAULTS.VERSION,
-      encrypted_payload: encryptedPayload,
-      metadata: {
-        originalSize: new TextEncoder().encode(serialized).length,
-        paddedSize: base64ToBytes(paddedData).length,
+      // Create report data structure
+      const reportData: DecryptedReportData = {
+        title: formData.title,
+        category: formData.category,
+        description: formData.description,
         timestamp: createFuzzyTimestamp(),
-        fileCount: formData.files.length,
-      },
-    };
+        attachments,
+      };
 
-    return { blob, key };
+      // Serialize and pad the data
+      const serialized = JSON.stringify(reportData);
+      const paddedData = this.padData(serialized);
+
+      // Encrypt the padded data
+      const encryptedPayload = await this.encrypt(paddedData, key);
+
+      // Create the encrypted blob
+      const blob: EncryptedReportBlob = {
+        version: ENCRYPTION_DEFAULTS.VERSION,
+        encrypted_payload: encryptedPayload,
+        metadata: {
+          originalSize: new TextEncoder().encode(serialized).length,
+          paddedSize: base64ToBytes(paddedData).length,
+          timestamp: createFuzzyTimestamp(),
+          fileCount: formData.files.length,
+        },
+      };
+
+      return { blob, key };
+    } catch (err) {
+      console.error('[encryption] encryptReport failed:', err);
+      throw err instanceof Error ? err : new Error(`Failed to encrypt report: ${err}`);
+    }
   }
 
   /**
@@ -251,16 +256,21 @@ class EncryptionService implements IEncryptionService {
     blob: EncryptedReportBlob,
     key: Uint8Array
   ): Promise<DecryptedReportData> {
-    // Decrypt the payload
-    const paddedData = await this.decrypt(blob.encrypted_payload, key);
+    try {
+      // Decrypt the payload
+      const paddedData = await this.decrypt(blob.encrypted_payload, key);
 
-    // Remove padding
-    const serialized = this.unpadData(paddedData);
+      // Remove padding
+      const serialized = this.unpadData(paddedData);
 
-    // Parse the report data
-    const reportData: DecryptedReportData = JSON.parse(serialized);
+      // Parse the report data
+      const reportData: DecryptedReportData = JSON.parse(serialized);
 
-    return reportData;
+      return reportData;
+    } catch (err) {
+      console.error('[encryption] decryptReport failed:', err);
+      throw err instanceof Error ? err : new Error(`Failed to decrypt report: ${err}`);
+    }
   }
 
   /**
@@ -270,11 +280,16 @@ class EncryptionService implements IEncryptionService {
     reportKey: Uint8Array,
     walletKey: Uint8Array
   ): Promise<string> {
-    const encrypted = await this.encrypt(
-      bytesToBase64(reportKey),
-      walletKey
-    );
-    return JSON.stringify(encrypted);
+    try {
+      const encrypted = await this.encrypt(
+        bytesToBase64(reportKey),
+        walletKey
+      );
+      return JSON.stringify(encrypted);
+    } catch (err) {
+      console.error('[encryption] encryptKeyWithWallet failed:', err);
+      throw err;
+    }
   }
 
   /**
@@ -284,9 +299,14 @@ class EncryptionService implements IEncryptionService {
     encryptedKey: string,
     walletKey: Uint8Array
   ): Promise<Uint8Array> {
-    const encrypted: EncryptedPackage = JSON.parse(encryptedKey);
-    const keyBase64 = await this.decrypt(encrypted, walletKey);
-    return base64ToBytes(keyBase64);
+    try {
+      const encrypted: EncryptedPackage = JSON.parse(encryptedKey);
+      const keyBase64 = await this.decrypt(encrypted, walletKey);
+      return base64ToBytes(keyBase64);
+    } catch (err) {
+      console.error('[encryption] decryptKeyWithWallet failed:', err);
+      throw err;
+    }
   }
 
   /**
@@ -298,29 +318,34 @@ class EncryptionService implements IEncryptionService {
     walletAddress: string,
     walletSignature: string
   ): Promise<void> {
-    // Derive storage key from wallet signature
-    const salt = new TextEncoder().encode(`covert-key-${cid}`);
-    const storageKey = await this.deriveKey(walletSignature, salt);
+    try {
+      // Derive storage key from wallet signature
+      const salt = new TextEncoder().encode(`covert-key-${cid}`);
+      const storageKey = await this.deriveKey(walletSignature, salt);
 
-    // Encrypt the report key
-    const encryptedKey = await this.encryptKeyWithWallet(reportKey, storageKey);
+      // Encrypt the report key
+      const encryptedKey = await this.encryptKeyWithWallet(reportKey, storageKey);
 
-    // Compute key hash for verification
-    const keyHash = await sha256Hex(reportKey);
+      // Compute key hash for verification
+      const keyHash = await sha256Hex(reportKey);
 
-    // Store in local storage
-    const entry = {
-      cid,
-      encryptedKey,
-      keyHash,
-      walletAddress,
-      storedAt: new Date().toISOString(),
-    };
+      // Store in local storage
+      const entry = {
+        cid,
+        encryptedKey,
+        keyHash,
+        walletAddress,
+        storedAt: new Date().toISOString(),
+      };
 
-    localStorage.setItem(`covert_key_${cid}`, JSON.stringify(entry));
+      localStorage.setItem(`covert_key_${cid}`, JSON.stringify(entry));
 
-    // Clear sensitive data from memory
-    secureZero(storageKey);
+      // Clear sensitive data from memory
+      secureZero(storageKey);
+    } catch (err) {
+      console.error('[encryption] storeKey failed:', err);
+      throw err;
+    }
   }
 
   /**
@@ -329,31 +354,37 @@ class EncryptionService implements IEncryptionService {
   async retrieveKey(
     cid: string,
     walletSignature: string
-  ): Promise<Uint8Array> {
-    const storedEntry = localStorage.getItem(`covert_key_${cid}`);
-    if (!storedEntry) {
-      throw this.createError('DECRYPTION_FAILED', `Key not found for CID: ${cid}`);
+  ): Promise<Uint8Array | null> {
+    try {
+      const storedEntry = localStorage.getItem(`covert_key_${cid}`);
+      if (!storedEntry) {
+        return null;
+      }
+
+      const entry = JSON.parse(storedEntry);
+
+      // Derive storage key from wallet signature
+      const salt = new TextEncoder().encode(`covert-key-${cid}`);
+      const storageKey = await this.deriveKey(walletSignature, salt);
+
+      // Decrypt the report key
+      const reportKey = await this.decryptKeyWithWallet(entry.encryptedKey, storageKey);
+
+      // Verify key hash
+      const computedHash = await sha256Hex(reportKey);
+      if (computedHash !== entry.keyHash) {
+        console.error('[encryption] retrieveKey: key hash mismatch');
+        return null;
+      }
+
+      // Clear sensitive data from memory
+      secureZero(storageKey);
+
+      return reportKey;
+    } catch (err) {
+      console.error('[encryption] retrieveKey failed:', err);
+      return null;
     }
-
-    const entry = JSON.parse(storedEntry);
-
-    // Derive storage key from wallet signature
-    const salt = new TextEncoder().encode(`covert-key-${cid}`);
-    const storageKey = await this.deriveKey(walletSignature, salt);
-
-    // Decrypt the report key
-    const reportKey = await this.decryptKeyWithWallet(entry.encryptedKey, storageKey);
-
-    // Verify key hash
-    const computedHash = await sha256Hex(reportKey);
-    if (computedHash !== entry.keyHash) {
-      throw this.createError('DECRYPTION_FAILED', 'Key verification failed');
-    }
-
-    // Clear sensitive data from memory
-    secureZero(storageKey);
-
-    return reportKey;
   }
 
   /**
@@ -378,17 +409,19 @@ class EncryptionService implements IEncryptionService {
   }
 
   /**
-   * Hash a CID using SHA-256 (for blockchain commitment)
+   * Hash a CID using keccak256 (matches smart contract & web3Service.computeCidHash)
+   * Import ethers here to avoid circular deps — only needed for this one function.
    */
   async hashCID(cid: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(cid);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = new Uint8Array(hashBuffer);
-    const hashHex = Array.from(hashArray)
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-    return '0x' + hashHex;
+    try {
+      // Use the same keccak256 as web3Service.computeCidHash so the hash is
+      // consistent across the encryption service, web3 service and smart contract.
+      const { ethers } = await import('ethers');
+      return ethers.keccak256(ethers.toUtf8Bytes(cid));
+    } catch (err) {
+      console.error('[encryption] hashCID failed:', err);
+      throw err;
+    }
   }
 
   /**

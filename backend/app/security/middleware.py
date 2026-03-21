@@ -2,7 +2,6 @@ import logging
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.cors import CORSMiddleware
 from typing import Callable
 import time
 
@@ -123,12 +122,8 @@ class SecurityValidationMiddleware(BaseHTTPMiddleware):
 
             origin = request.headers.get('Origin')
             if origin:
-                allowed_origins = [
-                    'http://localhost:3000',
-                    'http://localhost:5173',
-                    'https://covert.dev'
-                ]
-                if origin not in allowed_origins:
+                from app.core.config import settings
+                if origin not in settings.CORS_ORIGINS:
                     logger.warning(f"Request from unauthorized origin: {origin}")
 
             response = await call_next(request)
@@ -140,18 +135,3 @@ class SecurityValidationMiddleware(BaseHTTPMiddleware):
                 status_code=400,
                 content={"detail": "Security validation failed"}
             )
-
-
-def configure_cors(app):
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[
-            "http://localhost:3000",
-            "http://localhost:5173",
-            "https://covert.dev"
-        ],
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-        allow_headers=["*"],
-        max_age=3600,
-    )

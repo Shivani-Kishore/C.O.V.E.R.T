@@ -17,8 +17,8 @@ export const cryptoUtils: ICryptoUtils = {
     const buffer =
       typeof data === 'string' ? new TextEncoder().encode(data) : data;
 
-    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-    const hashArray = new Uint8Array(hashBuffer);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer as Uint8Array<ArrayBuffer>);
+    const hashArray = new Uint8Array(hashBuffer) as Uint8Array<ArrayBuffer>;
 
     return {
       bytes: hashArray,
@@ -73,7 +73,7 @@ export const cryptoUtils: ICryptoUtils = {
    * Convert base64 string to ArrayBuffer
    */
   base64ToArrayBuffer(base64: string): ArrayBuffer {
-    return base64ToBytes(base64).buffer;
+    return base64ToBytes(base64).buffer as ArrayBuffer;
   },
 };
 
@@ -141,7 +141,7 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
  * Convert base64 string to ArrayBuffer
  */
 export function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  return base64ToBytes(base64).buffer;
+  return base64ToBytes(base64).buffer as ArrayBuffer;
 }
 
 /**
@@ -293,13 +293,13 @@ export async function hmacSha256(
 ): Promise<Uint8Array> {
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
-    key,
+    key as Uint8Array<ArrayBuffer>,
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']
   );
 
-  const signature = await crypto.subtle.sign('HMAC', cryptoKey, data);
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, data as Uint8Array<ArrayBuffer>);
   return new Uint8Array(signature);
 }
 
@@ -313,13 +313,13 @@ export async function verifyHmacSha256(
 ): Promise<boolean> {
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
-    key,
+    key as Uint8Array<ArrayBuffer>,
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['verify']
   );
 
-  return crypto.subtle.verify('HMAC', cryptoKey, signature, data);
+  return crypto.subtle.verify('HMAC', cryptoKey, signature as Uint8Array<ArrayBuffer>, data as Uint8Array<ArrayBuffer>);
 }
 
 /**

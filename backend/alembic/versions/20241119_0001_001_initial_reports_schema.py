@@ -109,62 +109,6 @@ def upgrade() -> None:
         WHERE dms_enabled = TRUE AND dms_released = FALSE
     ''')
 
-    # ===== Moderations Table =====
-    op.create_table(
-        'moderations',
-        # Primary Key
-        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False, server_default=sa.text('gen_random_uuid()')),
-
-        # Foreign Keys
-        sa.Column('report_id', postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column('moderator_id', postgresql.UUID(as_uuid=True), nullable=True),
-
-        # Moderation Action
-        sa.Column('action', sa.Enum('review_started', 'request_info', 'verified', 'rejected', 'escalated', name='moderationaction'), nullable=False),
-        sa.Column('decision', sa.Enum('accept', 'reject', 'need_info', 'escalate', name='moderationdecision'), nullable=True),
-
-        # Encrypted Notes
-        sa.Column('encrypted_notes', sa.Text(), nullable=True),
-        sa.Column('notes_encryption_key_hash', sa.String(66), nullable=True),
-
-        # AI-Assisted Fields
-        sa.Column('ai_recommendation', sa.String(20), nullable=True),
-        sa.Column('ai_confidence', sa.Numeric(3, 2), nullable=True),
-        sa.Column('ai_flags', postgresql.JSONB(astext_type=sa.Text()), nullable=True, server_default='[]'),
-
-        # Decision Reasoning
-        sa.Column('rejection_reason', sa.Text(), nullable=True),
-        sa.Column('verification_evidence', sa.Text(), nullable=True),
-
-        # Timestamps
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
-        sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
-
-        # Metrics
-        sa.Column('time_spent_seconds', sa.Integer(), nullable=True),
-
-        # Primary Key
-        sa.PrimaryKeyConstraint('id'),
-
-        # Foreign Key
-        sa.ForeignKeyConstraint(['report_id'], ['reports.id'], ondelete='CASCADE'),
-
-        # Check Constraints
-        sa.CheckConstraint('ai_confidence >= 0.00 AND ai_confidence <= 1.00', name='valid_ai_confidence'),
-    )
-
-    # Moderations Indexes
-    op.create_index('idx_moderations_report', 'moderations', ['report_id'])
-    op.create_index('idx_moderations_moderator', 'moderations', ['moderator_id'])
-    op.create_index('idx_moderations_action', 'moderations', ['action'])
-    op.create_index('idx_moderations_created', 'moderations', ['created_at'])
-
-    # Partial index for pending moderations
-    op.execute('''
-        CREATE INDEX idx_moderations_pending ON moderations(completed_at)
-        WHERE completed_at IS NULL
-    ''')
-
     # ===== Report Logs Table =====
     op.create_table(
         'report_logs',
@@ -312,13 +256,10 @@ def downgrade() -> None:
     op.drop_table('zkp_nullifiers')
     op.drop_table('anchors')
     op.drop_table('report_logs')
-    op.drop_table('moderations')
     op.drop_table('reports')
 
     # Drop enums
     op.execute('DROP TYPE IF EXISTS logeventtype')
-    op.execute('DROP TYPE IF EXISTS moderationdecision')
-    op.execute('DROP TYPE IF EXISTS moderationaction')
     op.execute('DROP TYPE IF EXISTS risklevel')
     op.execute('DROP TYPE IF EXISTS reportstatus')
     op.execute('DROP TYPE IF EXISTS reportvisibility')

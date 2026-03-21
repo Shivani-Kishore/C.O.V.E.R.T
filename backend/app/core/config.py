@@ -43,7 +43,10 @@ class Settings(BaseSettings):
     CHAIN_ID: int = 31337  # Local Anvil
     COMMITMENT_REGISTRY_ADDRESS: str = ""
     DAILY_ANCHOR_ADDRESS: str = ""
-    REPUTATION_SBT_ADDRESS: str = ""
+    COV_CREDITS_ADDRESS: str = ""
+    COVERT_BADGES_ADDRESS: str = ""
+    COVERT_PROTOCOL_ADDRESS: str = ""
+    AUTOMATION_PRIVATE_KEY: str = ""  # Private key for AUTOMATION_ROLE signer (reviewer role management)
 
     # ===== Rate Limiting =====
     RATE_LIMIT_SUBMISSIONS: int = 10  # per hour
@@ -56,6 +59,13 @@ class Settings(BaseSettings):
     # ===== Monitoring =====
     SENTRY_DSN: str = ""
     LOG_LEVEL: str = "INFO"
+
+    @validator("SECRET_KEY")
+    def check_secret_key(cls, v, values):
+        env = values.get("ENVIRONMENT", "development")
+        if env == "production" and v == "CHANGE_THIS_IN_PRODUCTION":
+            raise ValueError("SECRET_KEY must be changed from default in production")
+        return v
 
     @validator("CORS_ORIGINS", pre=True)
     def parse_cors_origins(cls, v):

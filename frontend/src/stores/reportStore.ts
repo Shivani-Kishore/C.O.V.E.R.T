@@ -17,6 +17,7 @@ export interface Report {
   transactionHash: string;
   category: ReportCategory;
   title?: string;
+  description?: string;
   status: ReportStatus;
   visibility: ReportVisibility;
   verificationScore?: number;
@@ -24,6 +25,18 @@ export interface Report {
   fileSize: number;
   submittedAt: string;
   updatedAt?: string;
+  // On-chain fields (populated by enrichment in MySubmissions)
+  onChainId?: number;
+  reviewDecision?: number;    // 0=NONE, 1=NEEDS_EVIDENCE, 2=REVIEW_PASSED, 3=REJECT_SPAM
+  hasAppeal?: boolean;
+  finalizedAt?: number;
+}
+
+export interface FileMetadata {
+  name: string;
+  size: number;
+  type: string;
+  lastModified: number;
 }
 
 export interface ReportDraft {
@@ -32,6 +45,7 @@ export interface ReportDraft {
   description: string;
   visibility: ReportVisibility;
   files: File[];
+  fileMetadata: FileMetadata[];
 }
 
 export interface SubmissionProgress {
@@ -113,6 +127,7 @@ const initialDraft: ReportDraft = {
   description: '',
   visibility: 'moderated',
   files: [],
+  fileMetadata: [],
 };
 
 const initialProgress: SubmissionProgress = {
@@ -166,6 +181,12 @@ export const useReportStore = create<ReportState>()(
         draft: {
           ...state.draft,
           files: [...state.draft.files, file],
+          fileMetadata: [...state.draft.fileMetadata, {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            lastModified: file.lastModified,
+          }],
         },
       })),
 
@@ -173,6 +194,7 @@ export const useReportStore = create<ReportState>()(
         draft: {
           ...state.draft,
           files: state.draft.files.filter((_, i) => i !== index),
+          fileMetadata: state.draft.fileMetadata.filter((_, i) => i !== index),
         },
       })),
 
@@ -250,12 +272,29 @@ export const useReportStore = create<ReportState>()(
       },
     }),
     {
-      name: 'covert-reports',
+      // v3: restore draft text-field persistence (files are never serialisable,
+      //     but category/title/description/visibility survive page refresh).
+      //     Draft is cleared programmatically on wallet disconnect + after submit.
+      name: 'covert-reports-v3',
       partialize: (state) => ({
-        // Only persist draft, not reports (fetch fresh from API)
-        draft: state.draft,
+        // Only persist the submitted reports list, active filters, and
+        // the draft's text fields (so the user can navigate away and come back).
+        // File objects are never persisted — they must be re-uploaded each session.
+        reports: state.reports,
         filters: state.filters,
+        draft: {
+          category: state.draft.category,
+          title: state.draft.title,
+          description: state.draft.description,
+          visibility: state.draft.visibility,
+          files: [],
+          fileMetadata: [],
+        },
       }),
+      merge: (persisted: unknown, current) => {
+        const p = (persisted ?? {}) as Record<string, unknown>;
+        return { ...current, ...p };
+      },
     }
   )
 );

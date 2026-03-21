@@ -33,7 +33,7 @@ class IPFSService:
     """
 
     def __init__(self):
-        self.local_api_url = settings.IPFS_API_URL
+        self.local_api_url = self._multiaddr_to_http(settings.IPFS_API_URL)
         self.gateway_url = settings.IPFS_GATEWAY_URL
         self.pinata_api_key = settings.PINATA_API_KEY
         self.pinata_secret_key = settings.PINATA_SECRET_KEY
@@ -41,6 +41,16 @@ class IPFSService:
         self.max_retries = 3
         self.retry_delay = 1.0
         self.timeout = 300.0
+
+    @staticmethod
+    def _multiaddr_to_http(addr: str) -> str:
+        """Convert multiaddr like /ip4/127.0.0.1/tcp/5001 to http://127.0.0.1:5001"""
+        if addr.startswith("http"):
+            return addr.rstrip("/")
+        parts = addr.strip("/").split("/")
+        if len(parts) >= 4 and parts[0] == "ip4" and parts[2] == "tcp":
+            return f"http://{parts[1]}:{parts[3]}"
+        return f"http://127.0.0.1:5001"
 
     async def upload(
         self,
@@ -200,7 +210,7 @@ class IPFSService:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
-                    f"http://localhost:5001/api/v0/pin/rm?arg={cid}"
+                    f"{self.local_api_url}/api/v0/pin/rm?arg={cid}"
                 )
                 response.raise_for_status()
         except Exception as e:
@@ -226,7 +236,7 @@ class IPFSService:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
-                    f"http://localhost:5001/api/v0/pin/ls?arg={cid}"
+                    f"{self.local_api_url}/api/v0/pin/ls?arg={cid}"
                 )
                 if response.status_code == 200:
                     is_pinned = True
@@ -341,7 +351,7 @@ class IPFSService:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             files = {"file": ("data", data)}
             response = await client.post(
-                "http://localhost:5001/api/v0/add",
+                f"{self.local_api_url}/api/v0/add",
                 files=files,
             )
             response.raise_for_status()
@@ -366,7 +376,7 @@ class IPFSService:
         """Pin CID to local IPFS node"""
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"http://localhost:5001/api/v0/pin/add?arg={cid}"
+                f"{self.local_api_url}/api/v0/pin/add?arg={cid}"
             )
             response.raise_for_status()
             return response.json()

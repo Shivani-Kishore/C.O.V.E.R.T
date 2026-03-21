@@ -5,11 +5,31 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AppLayout } from './components/layout/AppLayout';
+import { LandingPage } from './pages/LandingPage';
 import { ReporterDashboard } from './pages/ReporterDashboard';
 import { SubmitReport } from './pages/SubmitReport';
 import { MySubmissions } from './components/reporter/MySubmissions';
-import { ModeratorDashboard } from './pages/ModeratorDashboard';
-import { ModerationQueue } from './components/moderator/ModerationQueue';
+import { ReviewerDashboard } from './pages/ReviewerDashboard';
+import { ProtocolModeratorDashboard } from './pages/ProtocolModeratorDashboard';
+import { useRoleAccess } from './hooks/useRoleAccess';
+import { ReportDetailPage } from './pages/ReportDetailPage';
+
+/** Renders the role-appropriate dashboard at the single /dashboard route. */
+function DashboardPage() {
+  const { isReviewer, isModerator, loading } = useRoleAccess();
+
+  if (loading) {
+    return (
+      <div className="py-16 text-center text-neutral-500">
+        Loading dashboard…
+      </div>
+    );
+  }
+
+  if (isModerator) return <ProtocolModeratorDashboard />;
+  if (isReviewer) return <ReviewerDashboard />;
+  return <ReporterDashboard />;
+}
 
 function App() {
   return (
@@ -25,18 +45,28 @@ function App() {
         }}
       />
       <Routes>
-        {/* Redirect root to dashboard */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        {/* Landing page — standalone, no AppLayout */}
+        <Route path="/" element={<LandingPage />} />
 
         {/* Main app routes with layout */}
         <Route element={<AppLayout />}>
-          <Route path="/dashboard" element={<ReporterDashboard />} />
+          {/* Dashboard — renders reporter / reviewer / moderator view based on role */}
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/submit" element={<SubmitReport />} />
           <Route path="/my-reports" element={<MySubmissions />} />
 
-          {/* Moderator routes */}
-          <Route path="/moderation" element={<ModeratorDashboard />} />
-          <Route path="/moderation/queue" element={<ModerationQueue />} />
+          {/* Legacy role-specific paths → unified dashboard */}
+          <Route path="/reviewer-dashboard" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/reviewer" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/moderator-dashboard" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/moderation" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/moderation/queue" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/moderation/history" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/moderation/stats" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/protocol-moderator" element={<Navigate to="/dashboard" replace />} />
+
+          {/* Report detail page */}
+          <Route path="/report/:id" element={<ReportDetailPage />} />
         </Route>
 
         {/* 404 fallback */}

@@ -3,7 +3,7 @@
  * Multi-step form with encryption, IPFS upload, and blockchain commitment
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   CheckIcon,
@@ -22,7 +22,11 @@ import { useReportStore, type ReportCategory, type ReportVisibility } from '@/st
 import { FileUpload } from './FileUpload';
 import { encryptionService } from '@/services/encryption';
 import { ipfsService } from '@/services/ipfs';
+import { web3Service } from '@/services/web3';
 import { useWeb3 } from '@/hooks/useWeb3';
+import { useCovBalanceStore, STAKE_AMOUNTS, type VisibilityKey } from '@/stores/covBalanceStore';
+import { ethers } from 'ethers';
+import { API_BASE } from '@/config';
 
 interface FormErrors {
   category?: string;
@@ -40,24 +44,27 @@ const CATEGORIES: { value: ReportCategory; label: string; description: string }[
   { value: 'other', label: 'Other', description: 'Other whistleblowing matters' },
 ];
 
-const VISIBILITY_OPTIONS: { value: ReportVisibility; label: string; description: string; icon: React.ElementType }[] = [
+const VISIBILITY_OPTIONS: { value: ReportVisibility; label: string; description: string; icon: React.ElementType; stake: number }[] = [
   {
     value: 'private',
     label: 'Private',
     description: 'Only you can access this report. Use for personal records.',
     icon: EyeSlashIcon,
+    stake: STAKE_AMOUNTS.private,
   },
   {
     value: 'moderated',
     label: 'Moderated',
     description: 'Moderators review before public access. Recommended for most reports.',
     icon: ShieldCheckIcon,
+    stake: STAKE_AMOUNTS.moderated,
   },
   {
     value: 'public',
     label: 'Public',
     description: 'Immediately visible to everyone after blockchain confirmation.',
     icon: EyeIcon,
+    stake: STAKE_AMOUNTS.public,
   },
 ];
 
@@ -83,7 +90,14 @@ export function ReportSubmissionForm() {
     addReport,
   } = useReportStore();
 
-  const { commitReport, isConnected, connect, walletState } = useWeb3();
+  const { commitReport, connect, walletState } = useWeb3();
+  const isConnected = walletState.connected;
+  const { deductStake } = useCovBalanceStore();
+
+  useEffect(() => {
+    resetSubmission();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const validateStep = useCallback((step: number): boolean => {
     const newErrors: FormErrors = {};
@@ -137,14 +151,14 @@ export function ReportSubmissionForm() {
       });
 
       const reportData = {
-        category: draft.category,
+        category: draft.category as import('@/types/encryption').ReportCategory,
         title: draft.title,
         description: draft.description,
         visibility: draft.visibility,
-        timestamp: new Date().toISOString(),
+        files: draft.files,
       };
 
-      const encryptedReport = await encryptionService.encryptReport(reportData);
+      const { blob: encryptedReport, key: encryptionKey } = await encryptionService.encryptReport(reportData);
 
       // Step 2: Upload to IPFS
       setSubmissionProgress({
@@ -153,12 +167,10 @@ export function ReportSubmissionForm() {
         message: 'Uploading to IPFS...',
       });
 
-      const ipfsResult = await ipfsService.uploadEncrypted(
-        new Blob([JSON.stringify(encryptedReport)], { type: 'application/json' })
-      );
+      const ipfsResult = await ipfsService.upload(encryptedReport);
 
-      if (!ipfsResult.success || !ipfsResult.cid) {
-        throw new Error(ipfsResult.error || 'IPFS upload failed');
+      if (!ipfsResult.cid) {
+        throw new Error('IPFS upload failed: No CID returned');
       }
 
       // Step 3: Commit to blockchain
@@ -168,13 +180,12 @@ export function ReportSubmissionForm() {
         message: 'Committing to blockchain...',
       });
 
-      // Calculate CID hash for smart contract
-      const cidHash = await encryptionService.hashCID(ipfsResult.cid);
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(ipfsResult.cid));
       const visibilityInt = draft.visibility === 'private' ? 0 : draft.visibility === 'moderated' ? 1 : 2;
 
-      const txResult = await commitReport(cidHash, visibilityInt);
+      const txResult = await commitReport(ipfsResult.cid, visibilityInt);
 
-      if (!txResult.success) {
+      if (!txResult.success || !txResult.transactionHash) {
         throw new Error(txResult.error || 'Blockchain commitment failed');
       }
 
@@ -185,29 +196,74 @@ export function ReportSubmissionForm() {
         message: 'Finalizing submission...',
       });
 
-      const response = await fetch('/api/v1/reports', {
+      const response = await fetch(`${API_BASE}/api/v1/reports`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          ...(walletState.address ? { 'X-Wallet-Address': walletState.address } : {}),
         },
         body: JSON.stringify({
           cid: ipfsResult.cid,
-          cidHash: cidHash,
-          txHash: txResult.transactionHash,
+          cid_hash: cidHash,
+          tx_hash: txResult.transactionHash,
           category: draft.category,
           visibility: visibilityInt,
-          sizeBytes: encryptedReport.encryptedData.length,
+          size_bytes: ipfsResult.size,
+          title: draft.title,
+          description: draft.description,
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to submit report to backend');
+        let detail = `Backend returned ${response.status}`;
+        try {
+          const errBody = await response.json();
+          detail = errBody?.detail ?? errBody?.message ?? detail;
+        } catch {
+          detail = response.statusText || detail;
+        }
+        throw new Error(`Failed to submit report: ${detail}`);
       }
 
       const result = await response.json();
 
-      // Add to local store
+      try {
+        if (walletState.address) {
+          const walletSignature = await web3Service.signMessage(
+            `COVERT Key Storage: ${ipfsResult.cid}`
+          );
+          await encryptionService.storeKey(
+            ipfsResult.cid,
+            encryptionKey,
+            walletState.address,
+            walletSignature
+          );
+        }
+      } catch (error) {
+        console.warn('Failed to store encryption key:', error);
+      }
+
+      // For PUBLIC and MODERATED reports: share the AES key with the backend so
+      // reviewers and moderators can decrypt the IPFS evidence bundle in-browser.
+      if (draft.visibility === 'public' || draft.visibility === 'moderated') {
+        try {
+          const keyHex = Array.from(encryptionKey)
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
+          await fetch(`${API_BASE}/api/v1/reports/by-hash/${cidHash}/evidence-key`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(walletState.address ? { 'X-Wallet-Address': walletState.address } : {}),
+            },
+            body: JSON.stringify({ key_hex: keyHex }),
+          });
+        } catch {
+          // Non-critical — report already submitted; evidence just won't be decryptable by reviewers
+        }
+      }
+
       addReport({
         id: result.id,
         commitmentHash: cidHash,
@@ -217,9 +273,15 @@ export function ReportSubmissionForm() {
         title: draft.title,
         status: 'pending',
         visibility: draft.visibility,
-        fileSize: encryptedReport.encryptedData.length,
+        fileSize: ipfsResult.size,
         submittedAt: new Date().toISOString(),
       });
+
+      // Deduct the stake from the COV balance immediately
+      if (walletState.address) {
+        const staked = deductStake(walletState.address, draft.visibility as VisibilityKey);
+        toast.success(`${staked} COV staked on your report`, { id: 'cov-stake', duration: 3000 });
+      }
 
       setSubmissionProgress({
         step: 'complete',
@@ -229,7 +291,6 @@ export function ReportSubmissionForm() {
 
       toast.success('Report submitted successfully!');
 
-      // Reset and navigate
       setTimeout(() => {
         resetDraft();
         resetSubmission();
@@ -238,63 +299,74 @@ export function ReportSubmissionForm() {
 
     } catch (error) {
       console.error('Submission error:', error);
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : (error as { message?: string })?.message ||
+          (typeof error === 'string' ? error : 'Unknown error occurred');
       setSubmissionProgress({
         step: 'error',
         progress: 0,
         message: 'Submission failed',
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        error: errorMessage,
       });
-      toast.error(error instanceof Error ? error.message : 'Submission failed');
+      toast.error(errorMessage);
     }
   }, [
     isConnected,
+    walletState,
     connect,
     draft,
     setSubmissionProgress,
     commitReport,
     addReport,
+    deductStake,
     resetDraft,
     resetSubmission,
     navigate,
   ]);
 
   const renderStepIndicator = () => (
-    <nav aria-label="Progress" className="mb-8">
+    <nav aria-label="Progress" className="mb-10">
       <ol className="flex items-center">
         {STEPS.map((step, index) => (
           <li key={step.id} className={`flex-1 ${index !== STEPS.length - 1 ? 'pr-8' : ''}`}>
             <div className="flex items-center">
               <div
                 className={`
-                  flex items-center justify-center w-10 h-10 rounded-full border-2
+                  flex items-center justify-center w-12 h-12 rounded-full border-2 font-semibold
+                  transition-all duration-300
                   ${currentStep > step.id
-                    ? 'bg-primary-600 border-primary-600 text-white'
+                    ? 'border-transparent text-white'
                     : currentStep === step.id
-                      ? 'border-primary-600 text-primary-600'
-                      : 'border-neutral-300 text-neutral-400'
+                      ? 'border-orange-500 text-white bg-neutral-800'
+                      : 'border-neutral-700 text-neutral-600 bg-neutral-900'
                   }
                 `}
+                style={currentStep > step.id ? { backgroundColor: '#E84B1A' } : {}}
               >
                 {currentStep > step.id ? (
-                  <CheckIcon className="h-5 w-5" />
+                  <CheckIcon className="h-6 w-6" />
                 ) : (
-                  <span>{step.id}</span>
+                  <span className="text-lg">{step.id}</span>
                 )}
               </div>
               {index !== STEPS.length - 1 && (
                 <div
-                  className={`
-                    flex-1 h-0.5 ml-4
-                    ${currentStep > step.id ? 'bg-primary-600' : 'bg-neutral-200'}
-                  `}
-                />
+                  className="flex-1 h-1 ml-4 rounded-full transition-all duration-300 bg-neutral-800 overflow-hidden"
+                >
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: currentStep > step.id ? '100%' : '0%', backgroundColor: '#E84B1A' }}
+                  />
+                </div>
               )}
             </div>
-            <div className="mt-2">
-              <p className={`text-sm font-medium ${currentStep >= step.id ? 'text-neutral-900' : 'text-neutral-400'}`}>
+            <div className="mt-3">
+              <p className={`text-sm font-semibold transition-colors ${currentStep >= step.id ? 'text-white' : 'text-neutral-600'}`}>
                 {step.name}
               </p>
-              <p className="text-xs text-neutral-500">{step.description}</p>
+              <p className="text-xs text-neutral-500 mt-0.5">{step.description}</p>
             </div>
           </li>
         ))}
@@ -304,41 +376,42 @@ export function ReportSubmissionForm() {
 
   const renderStep1 = () => (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-neutral-900">Report Details</h2>
+      <h2 className="text-2xl font-bold text-white">Report Details</h2>
 
       {/* Category Selection */}
       <div>
-        <label className="block text-sm font-medium text-neutral-700 mb-3">
-          Category <span className="text-red-500">*</span>
+        <label className="block text-sm font-semibold text-neutral-300 mb-4">
+          Category <span className="text-red-400">*</span>
         </label>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-4">
           {CATEGORIES.map((cat) => (
             <button
               key={cat.value}
               type="button"
               onClick={() => updateDraft({ category: cat.value })}
               className={`
-                p-4 text-left border rounded-lg transition-colors
+                p-5 text-left border rounded-xl transition-all duration-200
                 ${draft.category === cat.value
-                  ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-500'
-                  : 'border-neutral-200 hover:border-neutral-300'
+                  ? 'bg-neutral-800'
+                  : 'border-neutral-700 hover:border-neutral-500 bg-neutral-900'
                 }
               `}
+              style={draft.category === cat.value ? { borderColor: '#E84B1A', outline: '1.5px solid rgba(232,75,26,0.4)' } : {}}
             >
-              <p className="font-medium text-neutral-900">{cat.label}</p>
-              <p className="text-xs text-neutral-500 mt-1">{cat.description}</p>
+              <p className="font-semibold text-white">{cat.label}</p>
+              <p className="text-xs text-neutral-400 mt-1.5 leading-relaxed">{cat.description}</p>
             </button>
           ))}
         </div>
         {errors.category && (
-          <p className="mt-2 text-sm text-red-600">{errors.category}</p>
+          <p className="mt-3 text-sm text-red-400 font-medium">{errors.category}</p>
         )}
       </div>
 
       {/* Title */}
       <div>
-        <label className="block text-sm font-medium text-neutral-700 mb-2">
-          Title <span className="text-red-500">*</span>
+        <label className="block text-sm font-semibold text-neutral-300 mb-2">
+          Title <span className="text-red-400">*</span>
         </label>
         <input
           type="text"
@@ -347,25 +420,26 @@ export function ReportSubmissionForm() {
           placeholder="Brief summary of the issue"
           maxLength={200}
           className={`
-            w-full px-4 py-3 border rounded-lg
-            focus:ring-2 focus:ring-primary-500 focus:border-transparent
-            ${errors.title ? 'border-red-500' : 'border-neutral-300'}
+            w-full px-5 py-3.5 border rounded-xl transition-all duration-200
+            bg-neutral-900 text-white placeholder-neutral-600
+            focus:ring-2 focus:ring-neutral-500 focus:border-neutral-500
+            ${errors.title ? 'border-red-700 bg-red-950/20' : 'border-neutral-700 hover:border-neutral-500'}
           `}
         />
-        <div className="flex justify-between mt-1">
+        <div className="flex justify-between mt-2">
           {errors.title ? (
-            <p className="text-sm text-red-600">{errors.title}</p>
+            <p className="text-sm text-red-400 font-medium">{errors.title}</p>
           ) : (
             <p className="text-sm text-neutral-500">Minimum 10 characters</p>
           )}
-          <p className="text-sm text-neutral-400">{draft.title.length}/200</p>
+          <p className="text-sm text-neutral-500 font-medium">{draft.title.length}/200</p>
         </div>
       </div>
 
       {/* Description */}
       <div>
-        <label className="block text-sm font-medium text-neutral-700 mb-2">
-          Description <span className="text-red-500">*</span>
+        <label className="block text-sm font-semibold text-neutral-300 mb-2">
+          Description <span className="text-red-400">*</span>
         </label>
         <textarea
           value={draft.description}
@@ -374,18 +448,19 @@ export function ReportSubmissionForm() {
           rows={8}
           maxLength={5000}
           className={`
-            w-full px-4 py-3 border rounded-lg resize-none
-            focus:ring-2 focus:ring-primary-500 focus:border-transparent
-            ${errors.description ? 'border-red-500' : 'border-neutral-300'}
+            w-full px-5 py-3.5 border rounded-xl resize-none transition-all duration-200
+            bg-neutral-900 text-white placeholder-neutral-600
+            focus:ring-2 focus:ring-neutral-500 focus:border-neutral-500
+            ${errors.description ? 'border-red-700 bg-red-950/20' : 'border-neutral-700 hover:border-neutral-500'}
           `}
         />
-        <div className="flex justify-between mt-1">
+        <div className="flex justify-between mt-2">
           {errors.description ? (
-            <p className="text-sm text-red-600">{errors.description}</p>
+            <p className="text-sm text-red-400 font-medium">{errors.description}</p>
           ) : (
             <p className="text-sm text-neutral-500">Minimum 50 characters</p>
           )}
-          <p className="text-sm text-neutral-400">{draft.description.length}/5000</p>
+          <p className="text-sm text-neutral-500 font-medium">{draft.description.length}/5000</p>
         </div>
       </div>
     </div>
@@ -393,8 +468,8 @@ export function ReportSubmissionForm() {
 
   const renderStep2 = () => (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-neutral-900">Attachments (Optional)</h2>
-      <p className="text-neutral-600">
+      <h2 className="text-2xl font-bold text-white">Attachments (Optional)</h2>
+      <p className="text-neutral-400">
         Upload supporting documents, images, or videos. All files are encrypted before upload.
       </p>
 
@@ -404,13 +479,13 @@ export function ReportSubmissionForm() {
         showEncryptionStatus
       />
 
-      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+      <div className="p-5 bg-neutral-950 border border-neutral-800 rounded-xl">
         <div className="flex items-start">
-          <InformationCircleIcon className="h-5 w-5 text-blue-500 mt-0.5 mr-3" />
-          <div className="text-sm text-blue-700">
-            <p className="font-medium">Privacy Notice</p>
-            <p className="mt-1">
-              Files are encrypted on your device before being uploaded. Even platform operators cannot access your unencrypted data.
+          <InformationCircleIcon className="h-6 w-6 text-neutral-400 mt-0.5 mr-3 flex-shrink-0" />
+          <div className="text-sm text-neutral-400">
+            <p className="font-semibold text-white">Privacy Notice</p>
+            <p className="mt-1.5 leading-relaxed">
+              Files are encrypted on your device before upload. For <span className="text-neutral-300">Public</span> and <span className="text-neutral-300">Moderated</span> reports, the encryption key is shared with the platform so reviewers and moderators can view attached evidence. <span className="text-neutral-300">Private</span> reports keep the key on your device only.
             </p>
           </div>
         </div>
@@ -420,12 +495,12 @@ export function ReportSubmissionForm() {
 
   const renderStep3 = () => (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-neutral-900">Privacy Settings</h2>
-      <p className="text-neutral-600">
+      <h2 className="text-2xl font-bold text-white">Privacy Settings</h2>
+      <p className="text-neutral-400 leading-relaxed">
         Choose who can access your report. You can change this later.
       </p>
 
-      <div className="space-y-3">
+      <div className="space-y-4">
         {VISIBILITY_OPTIONS.map((option) => {
           const Icon = option.icon;
           return (
@@ -434,31 +509,37 @@ export function ReportSubmissionForm() {
               type="button"
               onClick={() => updateDraft({ visibility: option.value })}
               className={`
-                w-full p-4 text-left border rounded-lg transition-colors flex items-start
+                w-full p-5 text-left border rounded-xl transition-all duration-200 flex items-start
                 ${draft.visibility === option.value
-                  ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-500'
-                  : 'border-neutral-200 hover:border-neutral-300'
+                  ? 'bg-neutral-800'
+                  : 'border-neutral-700 hover:border-neutral-500 bg-neutral-900'
                 }
               `}
+              style={draft.visibility === option.value ? { borderColor: '#E84B1A', outline: '1.5px solid rgba(232,75,26,0.4)' } : {}}
             >
-              <Icon className={`h-6 w-6 mt-0.5 mr-3 ${
-                draft.visibility === option.value ? 'text-primary-600' : 'text-neutral-400'
-              }`} />
-              <div>
-                <p className="font-medium text-neutral-900">{option.label}</p>
-                <p className="text-sm text-neutral-500 mt-1">{option.description}</p>
+              <Icon className="h-7 w-7 mt-0.5 mr-4 transition-colors"
+                style={{ color: draft.visibility === option.value ? '#E84B1A' : '#737373' }} />
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-white text-lg">{option.label}</p>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                    style={{ backgroundColor: 'rgba(232,75,26,0.12)', color: '#E84B1A' }}>
+                    {option.stake} COV stake
+                  </span>
+                </div>
+                <p className="text-sm text-neutral-400 mt-1.5 leading-relaxed">{option.description}</p>
               </div>
             </button>
           );
         })}
       </div>
 
-      <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+      <div className="p-5 bg-green-950/20 border border-green-900/50 rounded-xl">
         <div className="flex items-start">
-          <ShieldCheckIcon className="h-5 w-5 text-green-500 mt-0.5 mr-3" />
-          <div className="text-sm text-green-700">
-            <p className="font-medium">Your Identity is Protected</p>
-            <p className="mt-1">
+          <ShieldCheckIcon className="h-6 w-6 text-green-500 mt-0.5 mr-3 flex-shrink-0" />
+          <div className="text-sm text-green-400">
+            <p className="font-semibold text-green-300">Your Identity is Protected</p>
+            <p className="mt-1.5 leading-relaxed">
               Your identity is protected through zero-knowledge proofs. Even moderators cannot see who submitted this report.
             </p>
           </div>
@@ -469,59 +550,67 @@ export function ReportSubmissionForm() {
 
   const renderStep4 = () => (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-neutral-900">Review & Submit</h2>
+      <h2 className="text-2xl font-bold text-white">Review & Submit</h2>
 
       {/* Summary Card */}
-      <div className="bg-neutral-50 rounded-lg p-6 space-y-4">
+      <div className="bg-neutral-900 rounded-xl p-7 space-y-5 border border-neutral-800">
         <div>
-          <p className="text-sm text-neutral-500">Category</p>
-          <p className="font-medium text-neutral-900">
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Category</p>
+          <p className="font-semibold text-white mt-1.5 text-lg">
             {CATEGORIES.find((c) => c.value === draft.category)?.label || 'Not selected'}
           </p>
         </div>
 
-        <div>
-          <p className="text-sm text-neutral-500">Title</p>
-          <p className="font-medium text-neutral-900">{draft.title || 'Not provided'}</p>
+        <div className="border-t border-neutral-800 pt-4">
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Title</p>
+          <p className="font-semibold text-white mt-1.5">{draft.title || 'Not provided'}</p>
         </div>
 
-        <div>
-          <p className="text-sm text-neutral-500">Description</p>
-          <p className="text-neutral-900 text-sm whitespace-pre-wrap">
+        <div className="border-t border-neutral-800 pt-4">
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Description</p>
+          <p className="text-neutral-300 text-sm whitespace-pre-wrap mt-1.5 leading-relaxed">
             {draft.description.length > 300
               ? `${draft.description.substring(0, 300)}...`
               : draft.description || 'Not provided'}
           </p>
         </div>
 
-        <div>
-          <p className="text-sm text-neutral-500">Attachments</p>
-          <p className="font-medium text-neutral-900">
+        <div className="border-t border-neutral-800 pt-4">
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Attachments</p>
+          <p className="font-semibold text-white mt-1.5">
             {draft.files.length} file(s)
           </p>
         </div>
 
-        <div>
-          <p className="text-sm text-neutral-500">Visibility</p>
-          <p className="font-medium text-neutral-900">
-            {VISIBILITY_OPTIONS.find((v) => v.value === draft.visibility)?.label || 'Not selected'}
-          </p>
+        <div className="border-t border-neutral-800 pt-4">
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Visibility</p>
+          <div className="flex items-center justify-between mt-1.5">
+            <p className="font-semibold text-white">
+              {VISIBILITY_OPTIONS.find((v) => v.value === draft.visibility)?.label || 'Not selected'}
+            </p>
+            {draft.visibility && (
+              <span className="text-sm font-semibold" style={{ color: '#E84B1A' }}>
+                {STAKE_AMOUNTS[draft.visibility as VisibilityKey]} COV will be staked
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Wallet Status */}
       {!isConnected && (
-        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+        <div className="p-5 bg-amber-950/20 border border-amber-900/50 rounded-xl">
           <div className="flex items-start">
-            <ExclamationTriangleIcon className="h-5 w-5 text-yellow-500 mt-0.5 mr-3" />
-            <div className="text-sm text-yellow-700">
-              <p className="font-medium">Wallet Not Connected</p>
-              <p className="mt-1">
+            <ExclamationTriangleIcon className="h-6 w-6 text-amber-500 mt-0.5 mr-3 flex-shrink-0" />
+            <div className="text-sm text-amber-400 flex-1">
+              <p className="font-semibold text-amber-300 text-base">Wallet Not Connected</p>
+              <p className="mt-1.5 leading-relaxed">
                 Please connect your wallet to submit the report to the blockchain.
               </p>
               <button
-                onClick={connect}
-                className="mt-2 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
+                onClick={() => connect()}
+                className="mt-3 px-6 py-2.5 rounded-lg font-semibold transition-all duration-200 hover:opacity-90"
+                style={{ backgroundColor: '#E84B1A', color: '#fff' }}
               >
                 Connect Wallet
               </button>
@@ -532,28 +621,29 @@ export function ReportSubmissionForm() {
 
       {/* Submission Progress */}
       {submissionProgress.step !== 'idle' && (
-        <div className="p-4 bg-white border border-neutral-200 rounded-lg">
+        <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-lg">
           <div className="flex items-center mb-3">
-            {submissionProgress.step === 'encrypting' && <LockClosedIcon className="h-5 w-5 text-primary-500 mr-2 animate-pulse" />}
-            {submissionProgress.step === 'uploading' && <CloudArrowUpIcon className="h-5 w-5 text-primary-500 mr-2 animate-pulse" />}
-            {submissionProgress.step === 'committing' && <CubeIcon className="h-5 w-5 text-primary-500 mr-2 animate-pulse" />}
-            {submissionProgress.step === 'submitting' && <DocumentCheckIcon className="h-5 w-5 text-primary-500 mr-2 animate-pulse" />}
+            {submissionProgress.step === 'encrypting' && <LockClosedIcon className="h-5 w-5 text-neutral-400 mr-2 animate-pulse" />}
+            {submissionProgress.step === 'uploading' && <CloudArrowUpIcon className="h-5 w-5 text-neutral-400 mr-2 animate-pulse" />}
+            {submissionProgress.step === 'committing' && <CubeIcon className="h-5 w-5 text-neutral-400 mr-2 animate-pulse" />}
+            {submissionProgress.step === 'submitting' && <DocumentCheckIcon className="h-5 w-5 text-neutral-400 mr-2 animate-pulse" />}
             {submissionProgress.step === 'complete' && <CheckIcon className="h-5 w-5 text-green-500 mr-2" />}
             {submissionProgress.step === 'error' && <ExclamationTriangleIcon className="h-5 w-5 text-red-500 mr-2" />}
-            <span className={`font-medium ${submissionProgress.step === 'error' ? 'text-red-600' : 'text-neutral-900'}`}>
+            <span className={`font-medium ${submissionProgress.step === 'error' ? 'text-red-400' : 'text-white'}`}>
               {submissionProgress.message}
             </span>
           </div>
-          <div className="w-full bg-neutral-200 rounded-full h-2">
+          <div className="w-full bg-neutral-800 rounded-full h-2">
             <div
-              className={`h-2 rounded-full transition-all duration-300 ${
-                submissionProgress.step === 'error' ? 'bg-red-500' : 'bg-primary-600'
-              }`}
-              style={{ width: `${submissionProgress.progress}%` }}
+              className="h-2 rounded-full transition-all duration-300"
+              style={{
+                width: `${submissionProgress.progress}%`,
+                backgroundColor: submissionProgress.step === 'error' ? '#ef4444' : '#E84B1A',
+              }}
             />
           </div>
           {submissionProgress.error && (
-            <p className="mt-2 text-sm text-red-600">{submissionProgress.error}</p>
+            <p className="mt-2 text-sm text-red-400">{submissionProgress.error}</p>
           )}
         </div>
       )}
@@ -561,26 +651,28 @@ export function ReportSubmissionForm() {
   );
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-4xl mx-auto animate-fade-in">
       {renderStepIndicator()}
 
-      <div className="bg-white rounded-lg border border-neutral-200 shadow-sm p-6">
-        {currentStep === 1 && renderStep1()}
-        {currentStep === 2 && renderStep2()}
-        {currentStep === 3 && renderStep3()}
-        {currentStep === 4 && renderStep4()}
+      <div className="bg-neutral-950 rounded-2xl border border-neutral-800 p-8">
+        <div className="animate-slide-up">
+          {currentStep === 1 && renderStep1()}
+          {currentStep === 2 && renderStep2()}
+          {currentStep === 3 && renderStep3()}
+          {currentStep === 4 && renderStep4()}
+        </div>
 
         {/* Navigation Buttons */}
-        <div className="flex justify-between mt-8 pt-6 border-t border-neutral-200">
+        <div className="flex justify-between mt-10 pt-6 border-t border-neutral-800">
           <button
             type="button"
             onClick={handleBack}
             disabled={currentStep === 1}
             className={`
-              px-6 py-2 rounded-lg font-medium transition-colors
+              px-8 py-3 rounded-xl font-semibold transition-all duration-200
               ${currentStep === 1
-                ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed'
-                : 'bg-neutral-200 text-neutral-700 hover:bg-neutral-300'
+                ? 'bg-neutral-900 text-neutral-600 cursor-not-allowed'
+                : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border border-neutral-700'
               }
             `}
           >
@@ -591,22 +683,18 @@ export function ReportSubmissionForm() {
             <button
               type="button"
               onClick={handleNext}
-              className="px-6 py-2 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 transition-colors"
+              className="px-8 py-3 rounded-xl font-semibold transition-all duration-200 hover:opacity-90"
+              style={{ backgroundColor: '#E84B1A', color: '#fff' }}
             >
-              Next
+              Continue
             </button>
           ) : (
             <button
               type="button"
               onClick={handleSubmit}
               disabled={submissionProgress.step !== 'idle' && submissionProgress.step !== 'error'}
-              className={`
-                px-6 py-2 rounded-lg font-medium transition-colors
-                ${submissionProgress.step !== 'idle' && submissionProgress.step !== 'error'
-                  ? 'bg-neutral-400 text-white cursor-not-allowed'
-                  : 'bg-primary-600 text-white hover:bg-primary-700'
-                }
-              `}
+              className="px-8 py-3 rounded-xl font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+              style={{ backgroundColor: '#E84B1A', color: '#fff' }}
             >
               Submit Report
             </button>

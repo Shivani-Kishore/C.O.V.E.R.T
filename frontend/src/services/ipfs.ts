@@ -14,12 +14,61 @@ import {
   IPFSError,
 } from '../types/encryption';
 
+// ── Dev-mode local blob store (IndexedDB) ──────────────────────────────────────
+// When VITE_DEV_MODE=true and no real IPFS service is configured, encrypted blobs
+// are stored in IndexedDB keyed by their fake "bafyDEV…" CID so the EvidenceViewer
+// can retrieve them without a real IPFS gateway.
+class DevIPFSStore {
+  private dbPromise: Promise<IDBDatabase> | null = null;
+
+  private openDB(): Promise<IDBDatabase> {
+    if (!this.dbPromise) {
+      this.dbPromise = new Promise((resolve, reject) => {
+        const request = indexedDB.open('covert-dev-ipfs', 1);
+        request.onupgradeneeded = (e) => {
+          const db = (e.target as IDBOpenDBRequest).result;
+          if (!db.objectStoreNames.contains('blobs')) {
+            db.createObjectStore('blobs');
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+    return this.dbPromise;
+  }
+
+  async put(cid: string, blob: EncryptedReportBlob): Promise<void> {
+    const db = await this.openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('blobs', 'readwrite');
+      tx.objectStore('blobs').put(blob, cid);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async get(cid: string): Promise<EncryptedReportBlob | null> {
+    const db = await this.openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('blobs', 'readonly');
+      const req = tx.objectStore('blobs').get(cid);
+      req.onsuccess = () => resolve((req.result as EncryptedReportBlob) ?? null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+}
+
+const devStore = new DevIPFSStore();
+
 /**
  * IPFS service implementation
  */
 class IPFSService implements IIPFSService {
   private nftStorageToken: string = '';
   private web3StorageToken: string = '';
+  private pinataApiKey: string = '';
+  private pinataSecretKey: string = '';
   private localGateway: string = IPFS_CONFIG.GATEWAY_URL;
 
   /**
@@ -28,6 +77,8 @@ class IPFSService implements IIPFSService {
   configure(config: {
     nftStorageToken?: string;
     web3StorageToken?: string;
+    pinataApiKey?: string;
+    pinataSecretKey?: string;
     localGateway?: string;
   }): void {
     if (config.nftStorageToken) {
@@ -35,6 +86,12 @@ class IPFSService implements IIPFSService {
     }
     if (config.web3StorageToken) {
       this.web3StorageToken = config.web3StorageToken;
+    }
+    if (config.pinataApiKey) {
+      this.pinataApiKey = config.pinataApiKey;
+    }
+    if (config.pinataSecretKey) {
+      this.pinataSecretKey = config.pinataSecretKey;
     }
     if (config.localGateway) {
       this.localGateway = config.localGateway;
@@ -60,10 +117,51 @@ class IPFSService implements IIPFSService {
       );
     }
 
-    // Try NFT.Storage first, then web3.storage, then local
+    // ── Dev-mode fast path ────────────────────────────────────────────────────
+    // When VITE_DEV_MODE=true and no real IPFS tokens are configured, skip all
+    // network attempts and return a deterministic fake CID immediately.
+    // This avoids waiting for connection timeouts against localhost:5001.
+    const isDevMode = import.meta.env.VITE_DEV_MODE === 'true';
+    const hasRealService = !!(this.pinataApiKey || this.nftStorageToken || this.web3StorageToken);
+    if (isDevMode && !hasRealService) {
+      console.warn(
+        '[DEV MODE] No IPFS tokens configured — using simulated CID. ' +
+        'Set VITE_NFT_STORAGE_TOKEN or VITE_WEB3_STORAGE_TOKEN to use real IPFS.'
+      );
+      const hashBuffer = await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(jsonData)
+      );
+      const hashHex = Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+      // "bafy" prefix mimics a real CIDv1 so backend prefix-validation passes
+      const fakeCid = `bafyDEV${hashHex.substring(0, 50)}`;
+      // Persist the encrypted blob locally so EvidenceViewer can retrieve it
+      await devStore.put(fakeCid, data);
+      if (onProgress) {
+        onProgress({ loaded: blob.size, total: blob.size, percentage: 100 });
+      }
+      return {
+        cid: fakeCid,
+        gatewayUrl: `https://ipfs.io/ipfs/${fakeCid}`,
+        size: blob.size,
+      };
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Try Pinata first, then NFT.Storage, then web3.storage, then local
     let lastError: Error | undefined;
 
-    // Try NFT.Storage
+    if (this.pinataApiKey && this.pinataSecretKey) {
+      try {
+        return await this.uploadToPinata(blob, onProgress);
+      } catch (error) {
+        console.warn('Pinata upload failed, trying fallback:', error);
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+
     if (this.nftStorageToken) {
       try {
         return await this.uploadToNFTStorage(blob, onProgress);
@@ -73,7 +171,6 @@ class IPFSService implements IIPFSService {
       }
     }
 
-    // Try web3.storage
     if (this.web3StorageToken) {
       try {
         return await this.uploadToWeb3Storage(blob, onProgress);
@@ -83,7 +180,6 @@ class IPFSService implements IIPFSService {
       }
     }
 
-    // Try local IPFS node
     try {
       return await this.uploadToLocalIPFS(blob, onProgress);
     } catch (error) {
@@ -91,10 +187,10 @@ class IPFSService implements IIPFSService {
       lastError = error instanceof Error ? error : new Error(String(error));
     }
 
-    throw this.createError(
-      'UPLOAD_FAILED',
-      'All IPFS upload methods failed',
-      lastError
+    throw new Error(
+      `IPFS upload failed: All upload methods failed. ` +
+      `Configure VITE_NFT_STORAGE_TOKEN / VITE_WEB3_STORAGE_TOKEN or run a local IPFS node. ` +
+      `(Last error: ${lastError?.message ?? 'unknown'})`
     );
   }
 
@@ -137,6 +233,53 @@ class IPFSService implements IIPFSService {
     return {
       cid: result.value.cid,
       gatewayUrl: `https://nftstorage.link/ipfs/${result.value.cid}`,
+      size: totalSize,
+    };
+  }
+
+  /**
+   * Upload to Pinata
+   */
+  private async uploadToPinata(
+    blob: Blob,
+    onProgress?: (progress: IPFSUploadProgress) => void
+  ): Promise<IPFSUploadResult> {
+    const totalSize = blob.size;
+
+    if (onProgress) {
+      onProgress({ loaded: 0, total: totalSize, percentage: 0 });
+    }
+
+    const formData = new FormData();
+    formData.append('file', blob, `report_${Date.now()}.json`);
+    formData.append('pinataMetadata', JSON.stringify({ name: `covert-report-${Date.now()}` }));
+
+    const response = await this.fetchWithRetry(
+      'https://api.pinata.cloud/pinning/pinFileToIPFS',
+      {
+        method: 'POST',
+        headers: {
+          pinata_api_key: this.pinataApiKey,
+          pinata_secret_api_key: this.pinataSecretKey,
+        },
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Pinata error: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+
+    if (onProgress) {
+      onProgress({ loaded: totalSize, total: totalSize, percentage: 100 });
+    }
+
+    return {
+      cid: result.IpfsHash,
+      gatewayUrl: `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`,
       size: totalSize,
     };
   }
@@ -200,8 +343,9 @@ class IPFSService implements IIPFSService {
     const formData = new FormData();
     formData.append('file', blob);
 
+    const ipfsApiUrl = import.meta.env.VITE_IPFS_API || 'http://localhost:5001';
     const response = await this.fetchWithRetry(
-      'http://localhost:5001/api/v0/add',
+      `${ipfsApiUrl}/api/v0/add`,
       {
         method: 'POST',
         body: formData,
@@ -221,7 +365,7 @@ class IPFSService implements IIPFSService {
 
     return {
       cid: result.Hash,
-      gatewayUrl: `http://localhost:8080/ipfs/${result.Hash}`,
+      gatewayUrl: `${this.localGateway}/${result.Hash}`,
       size: totalSize,
     };
   }
@@ -230,13 +374,24 @@ class IPFSService implements IIPFSService {
    * Retrieve encrypted blob from IPFS
    */
   async retrieve(cid: string): Promise<EncryptedReportBlob> {
+    // Dev-mode: CIDs starting with "bafyDEV" were stored locally in IndexedDB
+    if (cid.startsWith('bafyDEV')) {
+      const stored = await devStore.get(cid);
+      if (stored) return stored;
+      throw new Error(
+        `Dev-mode CID ${cid.slice(0, 24)}… not found in local store. ` +
+        `This can happen if you cleared site data or submitted the report in a different browser. ` +
+        `Re-submit the report to generate a new evidence bundle.`
+      );
+    }
+
     // Try multiple gateways
     const gateways = [
       `https://nftstorage.link/ipfs/${cid}`,
       `https://w3s.link/ipfs/${cid}`,
       `https://ipfs.io/ipfs/${cid}`,
       `https://cloudflare-ipfs.com/ipfs/${cid}`,
-      `http://localhost:8080/ipfs/${cid}`,
+      `${this.localGateway}/${cid}`,
     ];
 
     let lastError: Error | undefined;
@@ -302,8 +457,9 @@ class IPFSService implements IIPFSService {
 
     // Try local IPFS
     try {
+      const ipfsApiUrl = import.meta.env.VITE_IPFS_API || 'http://localhost:5001';
       const response = await this.fetchWithRetry(
-        `http://localhost:5001/api/v0/pin/add?arg=${cid}`,
+        `${ipfsApiUrl}/api/v0/pin/add?arg=${cid}`,
         {
           method: 'POST',
         }
@@ -330,8 +486,9 @@ class IPFSService implements IIPFSService {
   async unpin(cid: string): Promise<void> {
     // Try local IPFS
     try {
+      const ipfsApiUrl = import.meta.env.VITE_IPFS_API || 'http://localhost:5001';
       const response = await fetch(
-        `http://localhost:5001/api/v0/pin/rm?arg=${cid}`,
+        `${ipfsApiUrl}/api/v0/pin/rm?arg=${cid}`,
         {
           method: 'POST',
         }
@@ -457,8 +614,17 @@ class IPFSService implements IIPFSService {
   }
 }
 
-// Export singleton instance
+// Export singleton instance (auto-configured from env vars)
 export const ipfsService = new IPFSService();
+
+// Auto-configure from Vite env variables at import time
+ipfsService.configure({
+  pinataApiKey: import.meta.env.VITE_PINATA_API_KEY || '',
+  pinataSecretKey: import.meta.env.VITE_PINATA_SECRET_KEY || '',
+  nftStorageToken: import.meta.env.VITE_NFT_STORAGE_TOKEN || '',
+  web3StorageToken: import.meta.env.VITE_WEB3_STORAGE_TOKEN || '',
+  localGateway: import.meta.env.VITE_IPFS_GATEWAY || undefined,
+});
 
 // Export class for testing
 export { IPFSService };

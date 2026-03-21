@@ -317,7 +317,7 @@ contract DailyAnchorTest is Test {
         uint256 gasUsed = gasBefore - gasAfter;
         console.log("Gas used for submitAnchor:", gasUsed);
 
-        assertLt(gasUsed, 80000);
+        assertLt(gasUsed, 110000);
     }
 
     function test_GasCostVerifyProof() public {

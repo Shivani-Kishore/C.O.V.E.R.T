@@ -4,4 +4,6 @@
 
 export { ReporterDashboard } from './ReporterDashboard';
 export { SubmitReport } from './SubmitReport';
-export { ModeratorDashboard } from './ModeratorDashboard';
+export { ReviewerDashboard } from './ReviewerDashboard';
+export { ProtocolModeratorDashboard } from './ProtocolModeratorDashboard';
+export { LandingPage } from './LandingPage';

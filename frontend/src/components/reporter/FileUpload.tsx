@@ -2,7 +2,7 @@
  * C.O.V.E.R.T - File Upload Component with Encryption
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   CloudArrowUpIcon,
   DocumentIcon,
@@ -68,17 +68,41 @@ export function FileUpload({
 
   const { draft, addFile, removeFile } = useReportStore();
 
+  useEffect(() => {
+    const objectUrls: string[] = [];
+
+    if (draft.files.length > 0) {
+      const restored: FilePreview[] = draft.files.map((file) => {
+        let preview: string | undefined;
+        if (file.type.startsWith('image/')) {
+          preview = URL.createObjectURL(file);
+          objectUrls.push(preview);
+        }
+        return { file, preview, encrypted: false };
+      });
+      setPreviews(restored);
+    } else if (draft.fileMetadata.length > 0) {
+      const metadataPreviews: FilePreview[] = draft.fileMetadata.map((meta) => ({
+        file: new File([], meta.name, { type: meta.type, lastModified: meta.lastModified }),
+        encrypted: false,
+        error: 'File data lost after page reload. Please re-upload.',
+      }));
+      setPreviews(metadataPreviews);
+    }
+
+    return () => {
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const validateFile = useCallback((file: File): string | null => {
-    // Check file type
     if (!ALLOWED_TYPES.includes(file.type)) {
       return `File type "${file.type}" is not allowed`;
     }
-
-    // Check file size
     if (file.size > maxSize) {
       return `File size exceeds ${formatFileSize(maxSize)} limit`;
     }
-
     return null;
   }, [maxSize]);
 
@@ -86,7 +110,6 @@ export function FileUpload({
     setError(null);
     const fileArray = Array.from(files);
 
-    // Check max files
     if (draft.files.length + fileArray.length > maxFiles) {
       setError(`Maximum ${maxFiles} files allowed`);
       return;
@@ -106,7 +129,6 @@ export function FileUpload({
         continue;
       }
 
-      // Create preview for images
       let preview: string | undefined;
       if (file.type.startsWith('image/')) {
         preview = URL.createObjectURL(file);
@@ -115,10 +137,9 @@ export function FileUpload({
       newPreviews.push({
         file,
         preview,
-        encrypted: false, // Will be encrypted during submission
+        encrypted: false,
       });
 
-      // Add to store
       addFile(file);
     }
 
@@ -149,7 +170,6 @@ export function FileUpload({
   }, [processFiles]);
 
   const handleRemoveFile = useCallback((index: number) => {
-    // Revoke object URL if exists
     if (previews[index]?.preview) {
       URL.revokeObjectURL(previews[index].preview!);
     }
@@ -172,11 +192,11 @@ export function FileUpload({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={`
-          relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
-          transition-colors
+          relative border-2 border-dashed rounded-xl p-10 text-center cursor-pointer
+          transition-all duration-200
           ${isDragging
-            ? 'border-primary-500 bg-primary-50'
-            : 'border-neutral-300 hover:border-neutral-400 bg-neutral-50'
+            ? 'border-neutral-400 bg-neutral-900'
+            : 'border-neutral-700 hover:border-neutral-500 bg-neutral-950'
           }
           ${draft.files.length >= maxFiles ? 'opacity-50 cursor-not-allowed' : ''}
         `}
@@ -192,24 +212,24 @@ export function FileUpload({
         />
 
         <CloudArrowUpIcon className={`
-          mx-auto h-12 w-12
-          ${isDragging ? 'text-primary-500' : 'text-neutral-400'}
+          mx-auto h-14 w-14 transition-colors
+          ${isDragging ? 'text-white' : 'text-neutral-600'}
         `} />
 
-        <p className="mt-2 text-sm text-neutral-600">
-          <span className="font-semibold text-primary-600">Click to upload</span>
+        <p className="mt-3 text-base text-neutral-400">
+          <span className="font-bold text-white">Click to upload</span>
           {' or drag and drop'}
         </p>
-        <p className="mt-1 text-xs text-neutral-500">
+        <p className="mt-2 text-sm text-neutral-500">
           PDF, Images, Videos up to {formatFileSize(maxSize)}
         </p>
-        <p className="mt-1 text-xs text-neutral-400">
+        <p className="mt-1 text-sm text-neutral-600 font-medium">
           {draft.files.length}/{maxFiles} files
         </p>
 
         {showEncryptionStatus && (
-          <div className="mt-3 flex items-center justify-center text-xs text-green-600">
-            <LockClosedIcon className="h-3 w-3 mr-1" />
+          <div className="mt-4 inline-flex items-center px-3 py-1.5 bg-green-950/30 text-green-400 border border-green-900/50 rounded-full text-xs font-semibold">
+            <LockClosedIcon className="h-3.5 w-3.5 mr-1.5" />
             Files will be encrypted before upload
           </div>
         )}
@@ -217,7 +237,7 @@ export function FileUpload({
 
       {/* Error Message */}
       {error && (
-        <div className="flex items-center p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+        <div className="flex items-center p-3 bg-red-950/20 border border-red-900/50 rounded-lg text-red-400 text-sm">
           <ExclamationTriangleIcon className="h-5 w-5 mr-2" />
           {error}
         </div>
@@ -225,7 +245,7 @@ export function FileUpload({
 
       {/* File Previews */}
       {previews.length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {previews.map((preview, index) => {
             const FileIcon = getFileIcon(preview.file.type);
 
@@ -233,10 +253,10 @@ export function FileUpload({
               <div
                 key={index}
                 className={`
-                  flex items-center p-3 rounded-lg border
+                  flex items-center p-4 rounded-xl border transition-all duration-200
                   ${preview.error
-                    ? 'bg-red-50 border-red-200'
-                    : 'bg-white border-neutral-200'
+                    ? 'bg-red-950/20 border-red-900/50'
+                    : 'bg-neutral-950 border-neutral-800 hover:border-neutral-600'
                   }
                 `}
               >
@@ -245,24 +265,24 @@ export function FileUpload({
                   <img
                     src={preview.preview}
                     alt={preview.file.name}
-                    className="h-12 w-12 object-cover rounded"
+                    className="h-14 w-14 object-cover rounded-lg"
                   />
                 ) : (
-                  <div className="h-12 w-12 flex items-center justify-center bg-neutral-100 rounded">
-                    <FileIcon className="h-6 w-6 text-neutral-500" />
+                  <div className="h-14 w-14 flex items-center justify-center bg-neutral-900 rounded-lg">
+                    <FileIcon className="h-7 w-7 text-neutral-500" />
                   </div>
                 )}
 
                 {/* File Info */}
-                <div className="ml-3 flex-1 min-w-0">
-                  <p className="text-sm font-medium text-neutral-900 truncate">
+                <div className="ml-4 flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-white truncate">
                     {preview.file.name}
                   </p>
-                  <p className="text-xs text-neutral-500">
+                  <p className="text-xs text-neutral-500 mt-0.5 font-medium">
                     {formatFileSize(preview.file.size)}
                   </p>
                   {preview.error && (
-                    <p className="text-xs text-red-600 mt-1">
+                    <p className="text-xs text-red-400 mt-1.5 font-medium">
                       {preview.error}
                     </p>
                   )}
@@ -270,8 +290,8 @@ export function FileUpload({
 
                 {/* Encryption Status */}
                 {!preview.error && showEncryptionStatus && (
-                  <div className="flex items-center text-xs text-green-600 mr-3">
-                    <LockClosedIcon className="h-3 w-3 mr-1" />
+                  <div className="flex items-center px-2.5 py-1 bg-green-950/30 text-green-400 border border-green-900/50 rounded-lg text-xs font-semibold mr-3">
+                    <LockClosedIcon className="h-3.5 w-3.5 mr-1" />
                     Ready
                   </div>
                 )}
@@ -283,7 +303,7 @@ export function FileUpload({
                     e.stopPropagation();
                     handleRemoveFile(index);
                   }}
-                  className="p-1 text-neutral-400 hover:text-red-500 transition-colors"
+                  className="p-2 text-neutral-500 hover:text-red-400 hover:bg-red-950/20 rounded-lg transition-all duration-200"
                 >
                   <XMarkIcon className="h-5 w-5" />
                 </button>

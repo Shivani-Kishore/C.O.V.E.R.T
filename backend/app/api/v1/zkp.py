@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict
 
-from app.database import get_db
+from app.core.database import get_db
 from app.schemas.zkp import (
     ZKProofSubmission,
     ZKProofVerificationResponse,

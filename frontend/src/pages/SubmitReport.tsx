@@ -8,26 +8,29 @@ import { ReportSubmissionForm } from '@/components/reporter/ReportSubmissionForm
 
 export function SubmitReport() {
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-5xl mx-auto">
       {/* Header */}
-      <div className="mb-8">
+      <div className="mb-10">
         <Link
           to="/dashboard"
-          className="inline-flex items-center text-sm text-neutral-600 hover:text-neutral-900 mb-4"
+          className="inline-flex items-center text-sm font-medium text-neutral-500 hover:text-white mb-6 transition-colors"
         >
-          <ArrowLeftIcon className="h-4 w-4 mr-1" />
+          <ArrowLeftIcon className="h-4 w-4 mr-2" />
           Back to Dashboard
         </Link>
 
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-neutral-900">Submit a Report</h1>
-            <p className="text-neutral-600 mt-1">
+            <h1 className="text-4xl font-bold text-white">
+              Submit a Report
+            </h1>
+            <p className="text-neutral-400 mt-2 text-lg">
               Your submission will be encrypted and stored securely on IPFS and blockchain.
             </p>
           </div>
-          <div className="flex items-center text-sm text-green-600 bg-green-50 px-3 py-1 rounded-full">
-            <ShieldCheckIcon className="h-4 w-4 mr-1" />
+          <div className="flex items-center text-sm font-semibold px-4 py-2 rounded-full border"
+               style={{ color: '#E84B1A', backgroundColor: 'rgba(232,75,26,0.08)', borderColor: 'rgba(232,75,26,0.3)' }}>
+            <ShieldCheckIcon className="h-5 w-5 mr-2" />
             End-to-end encrypted
           </div>
         </div>
@@ -37,13 +40,13 @@ export function SubmitReport() {
       <ReportSubmissionForm />
 
       {/* Footer Info */}
-      <div className="mt-8 text-center text-sm text-neutral-500">
+      <div className="mt-12 text-center text-sm text-neutral-500 space-y-2 pb-8">
         <p>
           By submitting, you confirm that the information provided is accurate to the best of your knowledge.
         </p>
-        <p className="mt-2">
+        <p>
           Need help? Check our{' '}
-          <Link to="/help" className="text-primary-600 hover:underline">
+          <Link to="/help" className="text-neutral-300 hover:text-white font-semibold hover:underline">
             submission guidelines
           </Link>
           .

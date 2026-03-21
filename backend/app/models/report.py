@@ -25,10 +25,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import relationship, Mapped
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
-
-Base = declarative_base()
+from app.core.database import Base
 
 
 # ===== Enums =====
@@ -130,7 +128,7 @@ class Report(Base):
 
     # Privacy Settings
     visibility = Column(
-        SQLEnum(ReportVisibility),
+        SQLEnum(ReportVisibility, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=ReportVisibility.MODERATED
     )
@@ -138,16 +136,16 @@ class Report(Base):
 
     # Status Tracking
     status = Column(
-        SQLEnum(ReportStatus),
+        SQLEnum(ReportStatus, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=ReportStatus.PENDING,
         index=True
     )
     verification_score = Column(Numeric(3, 2))  # 0.00 - 1.00
-    risk_level = Column(SQLEnum(RiskLevel))
+    risk_level = Column(SQLEnum(RiskLevel, values_callable=lambda x: [e.value for e in x]))
 
     # Reporter Identity (Anonymous)
-    reporter_nullifier = Column(String(66), unique=True, index=True)
+    reporter_nullifier = Column(String(66), index=True)
     reporter_commitment = Column(String(66))
     burner_address = Column(String(42))
 
@@ -164,6 +162,15 @@ class Report(Base):
         onupdate=func.now()
     )
     last_accessed_at = Column(DateTime(timezone=True))
+
+    # Evidence Key (AES-256 key stored as hex, for reviewer/moderator access)
+    # Populated for PUBLIC and MODERATED reports after submission.
+    # NULL for PRIVATE reports (key stays in reporter's localStorage only).
+    evidence_key = Column(Text)
+
+    # Reviewer tracking — wallet address and decision of the reviewer who assessed this report
+    reviewer_address = Column(String(42))
+    review_decision = Column(String(20))  # 'REVIEW_PASSED' | 'NEEDS_EVIDENCE' | 'REJECT_SPAM' | None
 
     # Dead Man's Switch
     dms_enabled = Column(Boolean, default=False)
@@ -233,84 +240,6 @@ class Report(Base):
         }
 
 
-class Moderation(Base):
-    """
-    Tracks moderation actions and decisions
-    """
-    __tablename__ = "moderations"
-
-    # Primary Key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-
-    # Foreign Keys
-    report_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("reports.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
-    )
-    moderator_id = Column(UUID(as_uuid=True), index=True)  # References moderators table
-
-    # Moderation Action
-    action = Column(SQLEnum(ModerationAction), nullable=False)
-    decision = Column(SQLEnum(ModerationDecision))
-
-    # Encrypted Notes
-    encrypted_notes = Column(Text)
-    notes_encryption_key_hash = Column(String(66))
-
-    # AI-Assisted Fields
-    ai_recommendation = Column(String(20))
-    ai_confidence = Column(Numeric(3, 2))
-    ai_flags = Column(JSONB, default=[])
-
-    # Decision Reasoning
-    rejection_reason = Column(Text)
-    verification_evidence = Column(Text)
-
-    # Timestamps
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=func.now()
-    )
-    completed_at = Column(DateTime(timezone=True))
-
-    # Metrics
-    time_spent_seconds = Column(Integer)
-
-    # Relationships
-    report = relationship("Report", back_populates="moderations")
-
-    # Constraints
-    __table_args__ = (
-        CheckConstraint(
-            "ai_confidence >= 0.00 AND ai_confidence <= 1.00",
-            name="valid_ai_confidence"
-        ),
-        Index("idx_moderations_pending", completed_at, postgresql_where=(completed_at.is_(None))),
-    )
-
-    def __repr__(self):
-        return f"<Moderation {self.id} action={self.action}>"
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for API responses"""
-        return {
-            "id": str(self.id),
-            "report_id": str(self.report_id),
-            "moderator_id": str(self.moderator_id) if self.moderator_id else None,
-            "action": self.action.value if self.action else None,
-            "decision": self.decision.value if self.decision else None,
-            "ai_recommendation": self.ai_recommendation,
-            "ai_confidence": float(self.ai_confidence) if self.ai_confidence else None,
-            "ai_flags": self.ai_flags,
-            "time_spent_seconds": self.time_spent_seconds,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-        }
-
-
 class ReportLog(Base):
     """
     Audit trail for all report-related events
@@ -330,7 +259,7 @@ class ReportLog(Base):
     actor_id = Column(UUID(as_uuid=True))  # Could be moderator_id or null for system
 
     # Event Details
-    event_type = Column(SQLEnum(LogEventType), nullable=False, index=True)
+    event_type = Column(SQLEnum(LogEventType, values_callable=lambda x: [e.value for e in x]), nullable=False, index=True)
     event_data = Column(JSONB)
 
     # Change Tracking

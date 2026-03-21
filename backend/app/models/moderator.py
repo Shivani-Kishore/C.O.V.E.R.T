@@ -2,7 +2,7 @@
 C.O.V.E.R.T - Moderator Model
 """
 
-from sqlalchemy import Column, String, Integer, BigInteger, Boolean, DateTime, Text, Numeric, CheckConstraint
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, Numeric, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -21,7 +21,6 @@ class Moderator(Base):
 
     # Blockchain Identity
     wallet_address = Column(String(42), nullable=False, unique=True, index=True)
-    reputation_token_id = Column(BigInteger, nullable=True)
 
     # Reputation Metrics
     reputation_score = Column(Integer, nullable=False, default=0, index=True)

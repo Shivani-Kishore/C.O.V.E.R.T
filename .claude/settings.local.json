@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(\"e:/COVERT/C.O.V.E.R.T/backend/venv/Scripts/python.exe\" -m alembic:*)",
+      "Bash(\"venv/Scripts/python.exe\" -m alembic upgrade head)",
+      "Bash(\"venv/Scripts/python.exe\" -m alembic stamp 008)",
+      "Bash(\"venv/Scripts/python.exe\" -m alembic current)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

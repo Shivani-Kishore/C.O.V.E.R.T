@@ -78,11 +78,10 @@ export interface DecryptedAttachment {
  */
 export type ReportCategory =
   | 'corruption'
-  | 'harassment'
   | 'fraud'
   | 'safety'
-  | 'environmental'
-  | 'discrimination'
+  | 'environment'
+  | 'human_rights'
   | 'other';
 
 /**

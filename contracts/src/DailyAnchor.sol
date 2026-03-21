@@ -34,11 +34,13 @@ contract DailyAnchor {
 
     event OperatorAdded(address indexed operator);
     event OperatorRemoved(address indexed operator);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     /// @notice Errors
     error UnauthorizedOperator();
     error AnchorAlreadyExists();
     error OnlyOwner();
+    error ZeroAddress();
 
     modifier onlyOwner() {
         if (msg.sender != owner) {
@@ -89,8 +91,19 @@ contract DailyAnchor {
      * @param _operator Address to add
      */
     function addOperator(address _operator) external onlyOwner {
+        if (_operator == address(0)) revert ZeroAddress();
         operators[_operator] = true;
         emit OperatorAdded(_operator);
+    }
+
+    /**
+     * @notice Transfer ownership to a new address
+     * @param _newOwner Address of the new owner
+     */
+    function transferOwnership(address _newOwner) external onlyOwner {
+        if (_newOwner == address(0)) revert ZeroAddress();
+        emit OwnershipTransferred(owner, _newOwner);
+        owner = _newOwner;
     }
 
     /**

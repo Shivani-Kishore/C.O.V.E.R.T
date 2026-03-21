@@ -85,9 +85,20 @@ Thumbs.db
 # ===== Secrets & Keys =====
 *.pem
 *.key
-*.env.production
 secrets/
 private_keys/
+
+# ===== Root Environment Files =====
+# Track .env.example and .env.production.example (no real secrets)
+# but NEVER track .env or .env.production (contain real secrets)
+.env
+.env.local
+.env.production
+!.env.example
+!.env.production.example
+
+# ===== Deployment Artifacts =====
+deployments/*.json
 
 # ===== Logs =====
 logs/

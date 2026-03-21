@@ -41,10 +41,13 @@ export interface Anchor {
 }
 
 export interface TransactionResult {
-  hash: string;
-  blockNumber: number;
-  status: 'success' | 'failed';
-  gasUsed: bigint;
+  success: boolean;
+  transactionHash?: string;
+  hash?: string;
+  blockNumber?: number;
+  status?: 'success' | 'failed';
+  gasUsed?: bigint;
+  error?: string;
 }
 
 export interface Web3ServiceConfig {
@@ -81,15 +84,38 @@ class Web3Service {
 
   /**
    * Connect to wallet
+   *
+   * @param walletType  - Which wallet provider to use
+   * @param forcePrompt - When true, uses wallet_requestPermissions (EIP-2255) which
+   *                      always opens the wallet's account-selection UI regardless of
+   *                      existing permission state. Works across MetaMask, Coinbase
+   *                      Wallet, and any EIP-1193 compliant wallet. Use this after logout.
    */
-  async connect(walletType: WalletType = 'metamask'): Promise<WalletState> {
+  async connect(walletType: WalletType = 'metamask', forcePrompt = false): Promise<WalletState> {
     if (!window.ethereum) {
-      throw new Error('No Web3 provider found. Please install MetaMask.');
+      throw new Error('No Web3 provider found. Please install MetaMask or another Web3 wallet.');
     }
 
     try {
-      // Request account access
-      await window.ethereum.request({ method: 'eth_requestAccounts' });
+      if (forcePrompt) {
+        // wallet_requestPermissions (EIP-2255) always opens the wallet UI —
+        // it ignores previously granted permissions and forces a fresh prompt.
+        // This is the standard cross-wallet way to require re-authentication.
+        try {
+          await window.ethereum.request({
+            method: 'wallet_requestPermissions',
+            params: [{ eth_accounts: {} }],
+          });
+        } catch (permErr) {
+          // Wallet doesn't support wallet_requestPermissions — fall through to
+          // eth_requestAccounts which is universally supported.
+          console.warn('wallet_requestPermissions not supported, falling back:', permErr);
+          await window.ethereum.request({ method: 'eth_requestAccounts' });
+        }
+      } else {
+        // Normal connect — only prompts if not already authorised.
+        await window.ethereum.request({ method: 'eth_requestAccounts' });
+      }
 
       this.provider = new BrowserProvider(window.ethereum);
       this.signer = await this.provider.getSigner();
@@ -142,28 +168,86 @@ class Web3Service {
   }
 
   /**
-   * Get current wallet state
+   * Get current wallet state (requires active provider session).
+   * Returns disconnected state if provider is not yet initialized.
    */
   async getWalletState(): Promise<WalletState> {
     if (!this.provider || !this.signer) {
-      return {
-        connected: false,
-        address: null,
-        chainId: null,
-        balance: null,
-      };
+      return { connected: false, address: null, chainId: null, balance: null };
     }
 
-    const address = await this.signer.getAddress();
-    const network = await this.provider.getNetwork();
-    const balance = await this.provider.getBalance(address);
+    try {
+      const address = await this.signer.getAddress();
+      const network = await this.provider.getNetwork();
+      const balance = await this.provider.getBalance(address);
 
-    return {
-      connected: true,
-      address,
-      chainId: Number(network.chainId),
-      balance: ethers.formatEther(balance),
-    };
+      return {
+        connected: true,
+        address,
+        chainId: Number(network.chainId),
+        balance: ethers.formatEther(balance),
+      };
+    } catch (err) {
+      console.error('[web3] getWalletState failed:', err);
+      return { connected: false, address: null, chainId: null, balance: null };
+    }
+  }
+
+  /**
+   * Silently re-initialize provider from already-granted MetaMask permissions
+   * and return live wallet state — NO popup, NO eth_requestAccounts.
+   *
+   * Used on page load to restore an active session without prompting the user.
+   * Returns disconnected state if MetaMask has no accounts or permission was revoked.
+   */
+  async getWalletStateSilent(): Promise<WalletState> {
+    if (!window.ethereum) {
+      return { connected: false, address: null, chainId: null, balance: null };
+    }
+
+    // eth_accounts returns [] if not connected / locked — safe to call silently
+    const accounts = (await window.ethereum.request({ method: 'eth_accounts' })) as string[];
+    if (accounts.length === 0) {
+      return { connected: false, address: null, chainId: null, balance: null };
+    }
+
+    try {
+      // Re-initialize provider + signer from the granted permission
+      this.provider = new BrowserProvider(window.ethereum);
+      this.signer = await this.provider.getSigner();
+
+      // Re-initialize contracts if config is available
+      if (this.config) {
+        if (this.config.commitmentRegistryAddress) {
+          this.commitmentRegistry = new Contract(
+            this.config.commitmentRegistryAddress,
+            COMMITMENT_REGISTRY_ABI,
+            this.signer
+          );
+        }
+        if (this.config.dailyAnchorAddress) {
+          this.dailyAnchor = new Contract(
+            this.config.dailyAnchorAddress,
+            DAILY_ANCHOR_ABI,
+            this.signer
+          );
+        }
+      }
+
+      const address = await this.signer.getAddress();
+      const network = await this.provider.getNetwork();
+      const balance = await this.provider.getBalance(address);
+
+      return {
+        connected: true,
+        address,
+        chainId: Number(network.chainId),
+        balance: ethers.formatEther(balance),
+      };
+    } catch (err) {
+      console.error('[web3] getWalletStateSilent failed:', err);
+      return { connected: false, address: null, chainId: null, balance: null };
+    }
   }
 
   /**
@@ -217,10 +301,16 @@ class Web3Service {
     const networkParams = networks[chainId];
     if (!networkParams) throw new Error(`Unknown network: ${chainId}`);
 
-    await window.ethereum.request({
-      method: 'wallet_addEthereumChain',
-      params: [networkParams],
-    });
+    if (!window.ethereum) throw new Error('No wallet provider detected');
+    try {
+      await window.ethereum.request({
+        method: 'wallet_addEthereumChain',
+        params: [networkParams],
+      });
+    } catch (err) {
+      console.error('[web3] addNetwork failed:', err);
+      throw err;
+    }
   }
 
   // ============ CommitmentRegistry Functions ============
@@ -232,8 +322,34 @@ class Web3Service {
     cidHash: string,
     visibility: number
   ): Promise<TransactionResult> {
+    // ── Dev-mode simulation ────────────────────────────────────────────────────
+    // When VITE_DEV_MODE=true, skip ALL real blockchain interaction regardless
+    // of whether a contract address is configured. This avoids MetaMask popups,
+    // gas fees, and "insufficient funds" errors during local development.
+    if (import.meta.env.VITE_DEV_MODE === 'true') {
+      console.warn(
+        '[DEV MODE] Skipping real blockchain commit — using simulated tx hash. ' +
+        'Set VITE_DEV_MODE=false to send real transactions.'
+      );
+      // Generate a plausible-looking fake tx hash from the cidHash + timestamp
+      const hashBuffer = await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(`tx-${cidHash}-${Date.now()}`)
+      );
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const fakeTxHash = '0x' + hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+      return {
+        success: true,
+        transactionHash: fakeTxHash,
+        hash: fakeTxHash,
+        blockNumber: 1,
+        status: 'success',
+      };
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     if (!this.commitmentRegistry) {
-      throw new Error('Contract not initialized');
+      throw new Error('Contract not initialized. Set VITE_COMMITMENT_REGISTRY_ADDRESS in .env');
     }
 
     try {
@@ -258,6 +374,8 @@ class Web3Service {
       if (!receipt) throw new Error('Transaction failed');
 
       return {
+        success: receipt.status === 1,
+        transactionHash: receipt.hash,
         hash: receipt.hash,
         blockNumber: receipt.blockNumber,
         status: receipt.status === 1 ? 'success' : 'failed',
@@ -265,7 +383,10 @@ class Web3Service {
       };
     } catch (error) {
       console.error('Commit failed:', error);
-      throw error;
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
     }
   }
 
@@ -314,17 +435,27 @@ class Web3Service {
       throw new Error('Contract not initialized');
     }
 
-    const tx = await this.commitmentRegistry.deactivate(cidHash);
-    const receipt = await tx.wait();
+    try {
+      const tx = await this.commitmentRegistry.deactivate(cidHash);
+      const receipt = await tx.wait();
 
-    if (!receipt) throw new Error('Transaction failed');
+      if (!receipt) throw new Error('Transaction failed');
 
-    return {
-      hash: receipt.hash,
-      blockNumber: receipt.blockNumber,
-      status: receipt.status === 1 ? 'success' : 'failed',
-      gasUsed: receipt.gasUsed,
-    };
+      return {
+        success: receipt.status === 1,
+        transactionHash: receipt.hash,
+        hash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        status: receipt.status === 1 ? 'success' : 'failed',
+        gasUsed: receipt.gasUsed,
+      };
+    } catch (error) {
+      console.error('Deactivate failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
   }
 
   // ============ DailyAnchor Functions ============
@@ -341,17 +472,27 @@ class Web3Service {
       throw new Error('Contract not initialized');
     }
 
-    const tx = await this.dailyAnchor.submitAnchor(date, merkleRoot, actionCount);
-    const receipt = await tx.wait();
+    try {
+      const tx = await this.dailyAnchor.submitAnchor(date, merkleRoot, actionCount);
+      const receipt = await tx.wait();
 
-    if (!receipt) throw new Error('Transaction failed');
+      if (!receipt) throw new Error('Transaction failed');
 
-    return {
-      hash: receipt.hash,
-      blockNumber: receipt.blockNumber,
-      status: receipt.status === 1 ? 'success' : 'failed',
-      gasUsed: receipt.gasUsed,
-    };
+      return {
+        success: receipt.status === 1,
+        transactionHash: receipt.hash,
+        hash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        status: receipt.status === 1 ? 'success' : 'failed',
+        gasUsed: receipt.gasUsed,
+      };
+    } catch (error) {
+      console.error('Submit anchor failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
   }
 
   /**
@@ -388,7 +529,12 @@ class Web3Service {
       throw new Error('Contract not initialized');
     }
 
-    return await this.dailyAnchor.verifyProof(date, proof, leaf);
+    try {
+      return await this.dailyAnchor.verifyProof(date, proof, leaf);
+    } catch (err) {
+      console.error('[web3] verifyProof failed:', err);
+      return false;
+    }
   }
 
   // ============ Event Listeners ============
@@ -449,7 +595,12 @@ class Web3Service {
     if (!this.signer) {
       throw new Error('Wallet not connected');
     }
-    return await this.signer.signMessage(message);
+    try {
+      return await this.signer.signMessage(message);
+    } catch (err) {
+      console.error('[web3] signMessage failed:', err);
+      throw err;
+    }
   }
 
   /**
@@ -459,7 +610,12 @@ class Web3Service {
     if (!this.provider) {
       throw new Error('Provider not initialized');
     }
-    return await this.provider.getBlockNumber();
+    try {
+      return await this.provider.getBlockNumber();
+    } catch (err) {
+      console.error('[web3] getBlockNumber failed:', err);
+      return 0;
+    }
   }
 }
 

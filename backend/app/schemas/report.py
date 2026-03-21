@@ -15,12 +15,15 @@ class ReportCreate(BaseModel):
     category: str = Field(..., description="Report category")
     visibility: int = Field(..., ge=0, le=2, description="0=private, 1=moderated, 2=public")
     size_bytes: int = Field(..., gt=0, description="Size of encrypted data")
+    title: Optional[str] = Field(None, max_length=500, description="Report title (plaintext for reviewer display)")
+    description: Optional[str] = Field(None, max_length=10000, description="Report description (plaintext for reviewer display)")
 
     @field_validator("cid")
     @classmethod
     def validate_cid(cls, v: str) -> str:
-        if not v.startswith("bafy"):
-            raise ValueError("Invalid IPFS CID format")
+        # Accept CIDv0 (Qm...) and all CIDv1 variants (bafy..., bafk..., bafr..., etc.)
+        if not (v.startswith("Qm") or v.startswith("baf")):
+            raise ValueError("Invalid IPFS CID format (expected CIDv0 Qm... or CIDv1 baf...)")
         return v
 
     @field_validator("tx_hash")
@@ -43,9 +46,11 @@ class ReportResponse(BaseModel):
     cid: str
     cid_hash: Optional[str] = None
     tx_hash: str
-    category: str
+    category: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
     status: str
-    visibility: int
+    visibility: str  # "private" | "moderated" | "public"
     size_bytes: Optional[int] = None
     verification_score: Optional[float] = None
     risk_level: Optional[str] = None
@@ -62,14 +67,19 @@ class ReportListItem(BaseModel):
     cid: str
     cid_hash: Optional[str] = None
     tx_hash: str
-    category: str
+    category: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
     status: str
-    visibility: int
+    visibility: str  # "private" | "moderated" | "public"
     size_bytes: Optional[int] = None
     verification_score: Optional[float] = None
     risk_level: Optional[str] = None
     submitted_at: datetime
     reviewed_at: Optional[datetime] = None
+    # Only populated in the /all endpoint (reviewer/moderator access)
+    reporter: Optional[str] = None
+    review_decision: Optional[str] = None  # 'REVIEW_PASSED' | 'NEEDS_EVIDENCE' | 'REJECT_SPAM'
 
     model_config = {"from_attributes": True}
 
@@ -86,3 +96,5 @@ class ReportStatusUpdate(BaseModel):
     """Schema for status update"""
     status: str = Field(..., description="New status value")
     reason: Optional[str] = None
+    reviewer_address: Optional[str] = Field(None, description="Wallet address of the reviewer setting this decision")
+    review_decision: Optional[str] = Field(None, description="Reviewer's decision: REVIEW_PASSED | NEEDS_EVIDENCE | REJECT_SPAM")

@@ -6,6 +6,7 @@
 
 import React, { useState } from 'react';
 import { useWeb3 } from '../hooks/useWeb3';
+import { useReportStore } from '../stores/reportStore';
 
 interface WalletButtonProps {
   className?: string;
@@ -45,6 +46,8 @@ export const WalletButton: React.FC<WalletButtonProps> = ({
 }) => {
   const { walletState, isConnecting, error, connect, disconnect } = useWeb3();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const resetDraft = useReportStore((s) => s.resetDraft);
+  const setReports = useReportStore((s) => s.setReports);
 
   const handleConnect = async () => {
     try {
@@ -56,6 +59,10 @@ export const WalletButton: React.FC<WalletButtonProps> = ({
 
   const handleDisconnect = () => {
     disconnect();
+    // Clear any in-progress report draft and cached reports so they don't
+    // leak into the UI after disconnecting.
+    resetDraft();
+    setReports([]);
     setIsDropdownOpen(false);
   };
 
@@ -66,13 +73,14 @@ export const WalletButton: React.FC<WalletButtonProps> = ({
         onClick={handleConnect}
         disabled={isConnecting}
         className={`
-          px-4 py-2 rounded-lg font-medium transition-all
+          px-4 py-2 rounded-full font-medium transition-all
           ${isConnecting
-            ? 'bg-gray-400 cursor-not-allowed'
-            : 'bg-blue-600 hover:bg-blue-700 text-white'
+            ? 'bg-neutral-700 cursor-not-allowed text-neutral-400'
+            : 'hover:opacity-90 text-white'
           }
           ${className}
         `}
+        style={!isConnecting ? { backgroundColor: '#E84B1A' } : {}}
       >
         {isConnecting ? (
           <span className="flex items-center gap-2">
@@ -110,26 +118,26 @@ export const WalletButton: React.FC<WalletButtonProps> = ({
     <div className={`relative ${className}`}>
       <button
         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-white transition-all"
+        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 border border-neutral-700 hover:border-neutral-500 text-white transition-all"
       >
         {/* Status dot */}
         <span className="w-2 h-2 rounded-full bg-green-500" />
 
         {/* Address */}
-        <span className="font-mono">
+        <span className="font-mono text-sm">
           {walletState.address ? formatAddress(walletState.address) : ''}
         </span>
 
         {/* Balance */}
         {showBalance && walletState.balance && (
-          <span className="text-gray-400 text-sm">
+          <span className="text-neutral-500 text-sm">
             {formatBalance(walletState.balance)} ETH
           </span>
         )}
 
         {/* Dropdown arrow */}
         <svg
-          className={`w-4 h-4 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}
+          className={`w-4 h-4 text-neutral-500 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -140,24 +148,24 @@ export const WalletButton: React.FC<WalletButtonProps> = ({
 
       {/* Dropdown menu */}
       {isDropdownOpen && (
-        <div className="absolute right-0 mt-2 w-64 bg-gray-800 rounded-lg shadow-lg border border-gray-700 z-50">
-          <div className="p-4 border-b border-gray-700">
-            <p className="text-gray-400 text-xs">Connected Address</p>
+        <div className="absolute right-0 mt-2 w-64 bg-neutral-950 rounded-xl shadow-xl border border-neutral-800 z-50">
+          <div className="p-4 border-b border-neutral-800">
+            <p className="text-neutral-500 text-xs">Connected Address</p>
             <p className="font-mono text-white text-sm truncate">
               {walletState.address}
             </p>
           </div>
 
           {showNetwork && (
-            <div className="p-4 border-b border-gray-700">
-              <p className="text-gray-400 text-xs">Network</p>
+            <div className="p-4 border-b border-neutral-800">
+              <p className="text-neutral-500 text-xs">Network</p>
               <p className="text-white">{networkName}</p>
             </div>
           )}
 
           {showBalance && walletState.balance && (
-            <div className="p-4 border-b border-gray-700">
-              <p className="text-gray-400 text-xs">Balance</p>
+            <div className="p-4 border-b border-neutral-800">
+              <p className="text-neutral-500 text-xs">Balance</p>
               <p className="text-white">{formatBalance(walletState.balance)} ETH</p>
             </div>
           )}
@@ -165,7 +173,7 @@ export const WalletButton: React.FC<WalletButtonProps> = ({
           <div className="p-2">
             <button
               onClick={handleDisconnect}
-              className="w-full px-4 py-2 text-left text-red-400 hover:bg-gray-700 rounded-lg transition-colors"
+              className="w-full px-4 py-2 text-left text-red-400 hover:bg-neutral-900 rounded-lg transition-colors"
             >
               Disconnect
             </button>
@@ -175,7 +183,7 @@ export const WalletButton: React.FC<WalletButtonProps> = ({
 
       {/* Error display */}
       {error && (
-        <div className="absolute right-0 mt-2 p-2 bg-red-900 text-red-200 text-sm rounded-lg">
+        <div className="absolute right-0 mt-2 p-2 bg-red-950 border border-red-900 text-red-400 text-sm rounded-lg">
           {error}
         </div>
       )}

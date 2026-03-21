@@ -6,7 +6,7 @@ test = "test"
 script = "script"
 cache_path = "cache"
 solc_version = "0.8.20"
-remappings = ["forge-std/=lib/forge-std/src/"]
+remappings = ["forge-std/=lib/forge-std/src/", "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"]
 fs_permissions = [{ access = "read-write", path = "./deployments" }]
 
 
@@ -21,9 +21,10 @@ evm_version = "paris"
 gas_reports = ["*"]
 
 # Formatter
-fmt_line_length = 120
-fmt_tab_width = 4
-fmt_bracket_spacing = true
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = true
 
 # RPC endpoints
 [rpc_endpoints]

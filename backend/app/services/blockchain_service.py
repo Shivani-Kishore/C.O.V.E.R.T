@@ -115,6 +115,39 @@ DAILY_ANCHOR_ABI = json.loads("""
 ]
 """)
 
+COVERT_PROTOCOL_ABI = json.loads("""
+[
+    {
+        "inputs": [{"name": "role", "type": "bytes32"}, {"name": "account", "type": "address"}],
+        "name": "grantRole",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [{"name": "role", "type": "bytes32"}, {"name": "account", "type": "address"}],
+        "name": "revokeRole",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [{"name": "role", "type": "bytes32"}, {"name": "account", "type": "address"}],
+        "name": "hasRole",
+        "outputs": [{"name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "REVIEWER_ROLE",
+        "outputs": [{"name": "", "type": "bytes32"}],
+        "stateMutability": "view",
+        "type": "function"
+    }
+]
+""")
+
 
 @dataclass
 class Commitment:
@@ -161,8 +194,12 @@ class BlockchainService:
     def __init__(self):
         self.w3: Optional[Web3] = None
         self.account: Optional[LocalAccount] = None
+        self.automation_account: Optional[LocalAccount] = None
         self.commitment_registry: Optional[Contract] = None
         self.daily_anchor: Optional[Contract] = None
+        self.covert_protocol: Optional[Contract] = None
+        self._reviewer_role: Optional[bytes] = None
+        self._moderator_role: Optional[bytes] = None
         self._event_callbacks: dict = {}
 
     async def initialize(self) -> None:
@@ -194,6 +231,18 @@ class BlockchainService:
                     abi=DAILY_ANCHOR_ABI
                 )
                 logger.info(f"DailyAnchor: {settings.DAILY_ANCHOR_ADDRESS}")
+
+            if settings.COVERT_PROTOCOL_ADDRESS:
+                self.covert_protocol = self.w3.eth.contract(
+                    address=Web3.to_checksum_address(settings.COVERT_PROTOCOL_ADDRESS),
+                    abi=COVERT_PROTOCOL_ABI
+                )
+                logger.info(f"CovertProtocol: {settings.COVERT_PROTOCOL_ADDRESS}")
+
+            # Initialize automation signer if configured
+            if settings.AUTOMATION_PRIVATE_KEY:
+                self.automation_account = Account.from_key(settings.AUTOMATION_PRIVATE_KEY)
+                logger.info(f"Automation signer: {self.automation_account.address}")
 
         except Exception as e:
             logger.error(f"Blockchain initialization failed: {e}")
@@ -438,6 +487,104 @@ class BlockchainService:
         except Exception as e:
             logger.error(f"Failed to get anchor events: {e}")
             return []
+
+    # ============ CovertProtocol: Reviewer Role Management ============
+
+    async def _get_reviewer_role(self) -> bytes:
+        """Cache and return the REVIEWER_ROLE bytes32 from the contract."""
+        if self._reviewer_role is not None:
+            return self._reviewer_role
+        if not self.covert_protocol:
+            raise BlockchainServiceError("NOT_INITIALIZED", "CovertProtocol not initialized")
+        self._reviewer_role = self.covert_protocol.functions.REVIEWER_ROLE().call()
+        return self._reviewer_role
+
+    async def _get_moderator_role(self) -> bytes:
+        """Cache and return the MODERATOR_ROLE bytes32 from the contract."""
+        if self._moderator_role is not None:
+            return self._moderator_role
+        if not self.covert_protocol:
+            raise BlockchainServiceError("NOT_INITIALIZED", "CovertProtocol not initialized")
+        self._moderator_role = self.covert_protocol.functions.MODERATOR_ROLE().call()
+        return self._moderator_role
+
+    async def has_moderator_role(self, wallet_address: str) -> bool:
+        """Check if a wallet currently holds the MODERATOR_ROLE on-chain."""
+        if not self.covert_protocol:
+            return False
+        try:
+            role = await self._get_moderator_role()
+            return self.covert_protocol.functions.hasRole(
+                role, Web3.to_checksum_address(wallet_address)
+            ).call()
+        except Exception as e:
+            logger.error(f"Failed to check moderator role: {e}")
+            return False
+
+    async def has_reviewer_role(self, wallet_address: str) -> bool:
+        """Check if a wallet currently holds the REVIEWER_ROLE on-chain."""
+        if not self.covert_protocol:
+            return False
+        try:
+            role = await self._get_reviewer_role()
+            return self.covert_protocol.functions.hasRole(
+                role, Web3.to_checksum_address(wallet_address)
+            ).call()
+        except Exception as e:
+            logger.error(f"Failed to check reviewer role: {e}")
+            return False
+
+    async def grant_reviewer_role(self, wallet_address: str) -> TransactionResult:
+        """Grant REVIEWER_ROLE to a wallet using the AUTOMATION_ROLE signer."""
+        if not self.covert_protocol or not self.automation_account or not self.w3:
+            raise BlockchainServiceError("NOT_INITIALIZED", "CovertProtocol or automation signer not initialized")
+
+        role = await self._get_reviewer_role()
+        addr = Web3.to_checksum_address(wallet_address)
+
+        tx = self.covert_protocol.functions.grantRole(role, addr).build_transaction({
+            'from': self.automation_account.address,
+            'nonce': self.w3.eth.get_transaction_count(self.automation_account.address),
+            'gas': 150000,
+            'gasPrice': self.w3.eth.gas_price,
+        })
+        signed_tx = self.w3.eth.account.sign_transaction(tx, self.automation_account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        logger.info(f"Granted REVIEWER_ROLE to {wallet_address}, tx={receipt['transactionHash'].hex()}")
+
+        return TransactionResult(
+            hash=receipt['transactionHash'].hex(),
+            block_number=receipt['blockNumber'],
+            status='success' if receipt['status'] == 1 else 'failed',
+            gas_used=receipt['gasUsed'],
+        )
+
+    async def revoke_reviewer_role(self, wallet_address: str) -> TransactionResult:
+        """Revoke REVIEWER_ROLE from a wallet using the AUTOMATION_ROLE signer."""
+        if not self.covert_protocol or not self.automation_account or not self.w3:
+            raise BlockchainServiceError("NOT_INITIALIZED", "CovertProtocol or automation signer not initialized")
+
+        role = await self._get_reviewer_role()
+        addr = Web3.to_checksum_address(wallet_address)
+
+        tx = self.covert_protocol.functions.revokeRole(role, addr).build_transaction({
+            'from': self.automation_account.address,
+            'nonce': self.w3.eth.get_transaction_count(self.automation_account.address),
+            'gas': 150000,
+            'gasPrice': self.w3.eth.gas_price,
+        })
+        signed_tx = self.w3.eth.account.sign_transaction(tx, self.automation_account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        logger.info(f"Revoked REVIEWER_ROLE from {wallet_address}, tx={receipt['transactionHash'].hex()}")
+
+        return TransactionResult(
+            hash=receipt['transactionHash'].hex(),
+            block_number=receipt['blockNumber'],
+            status='success' if receipt['status'] == 1 else 'failed',
+            gas_used=receipt['gasUsed'],
+        )
 
     # ============ Utility Functions ============
 

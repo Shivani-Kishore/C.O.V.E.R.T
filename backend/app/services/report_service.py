@@ -10,7 +10,8 @@ from datetime import datetime
 from uuid import UUID
 import logging
 
-from app.models.report import Report, ReportStatus, ReportVisibility, ReportLog
+from app.models.report import Report, ReportStatus, ReportVisibility, ReportLog, LogEventType
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,8 @@ class ReportService:
         visibility: int,
         size_bytes: int,
         reporter_id: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
     ) -> Report:
         """Create a new report"""
         try:
@@ -40,23 +43,37 @@ class ReportService:
             vis_enum = visibility_map.get(visibility, ReportVisibility.MODERATED)
 
             report = Report(
-                cid=cid,
-                cid_hash=cid_hash,
-                tx_hash=tx_hash,
-                category=category,
-                visibility=visibility,
-                size_bytes=size_bytes,
-                reporter_id=reporter_id,
+                # IPFS storage — model uses ipfs_cid, not cid
+                ipfs_cid=cid,
+                # Blockchain — model uses commitment_hash (keccak256 of CID)
+                commitment_hash=cid_hash,
+                # Transaction hash
+                transaction_hash=tx_hash,
+                # Metadata
+                encrypted_category=category,
+                encrypted_title=title,
+                encrypted_summary=description,
+                visibility=vis_enum,
+                file_size=size_bytes,
+                # Identify the reporter anonymously by wallet address / IP hash
+                reporter_nullifier=reporter_id,
+                # Timestamps
+                submission_timestamp=datetime.utcnow(),
+                # Chain — default to local Anvil; can be overridden via env
+                chain_id=settings.CHAIN_ID,
                 status=ReportStatus.PENDING,
-                submitted_at=datetime.utcnow(),
             )
 
             db.add(report)
 
-            # Create log entry
+            # Flush to DB so the UUID primary key is generated before we
+            # reference report.id in the audit log FK.
+            await db.flush()
+
+            # Create audit log entry (now report.id is populated)
             log = ReportLog(
                 report_id=report.id,
-                event_type="created",
+                event_type=LogEventType.CREATED,
                 event_data={"category": category, "visibility": visibility},
             )
             db.add(log)
@@ -106,7 +123,7 @@ class ReportService:
             # Build query
             query = select(Report).where(
                 and_(
-                    Report.reporter_id == reporter_id,
+                    Report.reporter_nullifier == reporter_id,
                     Report.deleted_at.is_(None)
                 )
             )
@@ -125,7 +142,7 @@ class ReportService:
             total = count_result.scalar() or 0
 
             # Apply pagination and ordering
-            query = query.order_by(Report.submitted_at.desc())
+            query = query.order_by(Report.submission_timestamp.desc())
             query = query.limit(limit).offset(offset)
 
             result = await db.execute(query)
@@ -135,6 +152,79 @@ class ReportService:
 
         except Exception as e:
             logger.error(f"Failed to get user reports: {e}")
+            return [], 0
+
+    async def get_all_reports(
+        self,
+        db: AsyncSession,
+        status: Optional[str] = None,
+        category: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Tuple[List[Report], int]:
+        """Get all non-deleted reports (no ownership filter). For reviewer/moderator access."""
+        try:
+            query = select(Report).where(Report.deleted_at.is_(None))
+
+            if status:
+                try:
+                    status_enum = ReportStatus(status)
+                    query = query.where(Report.status == status_enum)
+                except ValueError:
+                    pass
+
+            if category:
+                query = query.where(Report.encrypted_category == category)
+
+            count_query = select(func.count()).select_from(query.subquery())
+            count_result = await db.execute(count_query)
+            total = count_result.scalar() or 0
+
+            query = query.order_by(Report.submission_timestamp.desc())
+            query = query.limit(limit).offset(offset)
+
+            result = await db.execute(query)
+            reports = list(result.scalars().all())
+
+            return reports, total
+
+        except Exception as e:
+            logger.error(f"Failed to get all reports: {e}")
+            return [], 0
+
+    async def get_public_reports(
+        self,
+        db: AsyncSession,
+        limit: int = 50,
+        offset: int = 0,
+        category: Optional[str] = None,
+    ) -> Tuple[List[Report], int]:
+        """Get all public-visibility reports, newest first. No auth required."""
+        try:
+            query = select(Report).where(
+                and_(
+                    Report.visibility == ReportVisibility.PUBLIC,
+                    Report.deleted_at.is_(None),
+                )
+            )
+
+            if category:
+                query = query.where(Report.encrypted_category == category)
+
+            count_query = select(func.count()).select_from(query.subquery())
+            count_result = await db.execute(count_query)
+            total = count_result.scalar() or 0
+
+            query = query.order_by(Report.submission_timestamp.desc())
+            query = query.limit(limit).offset(offset)
+
+            result = await db.execute(query)
+            reports = list(result.scalars().all())
+
+            return reports, total
+
+        except Exception as e:
+            logger.error(f"Failed to get public reports: {e}")
             return [], 0
 
     async def delete_report(
@@ -153,7 +243,7 @@ class ReportService:
             # Create log entry
             log = ReportLog(
                 report_id=report.id,
-                event_type="deleted",
+                event_type=LogEventType.DELETED,
             )
             db.add(log)
 
@@ -180,14 +270,14 @@ class ReportService:
             if not report:
                 return None
 
-            report.tx_hash = tx_hash
+            report.transaction_hash = tx_hash
             if block_number:
                 report.block_number = block_number
 
-            # Create log entry
+            # Create audit log entry
             log = ReportLog(
                 report_id=report.id,
-                event_type="blockchain_committed",
+                event_type=LogEventType.MODIFIED,
                 event_data={"tx_hash": tx_hash, "block_number": block_number},
             )
             db.add(log)
@@ -225,7 +315,7 @@ class ReportService:
             # Create log entry
             log = ReportLog(
                 report_id=report.id,
-                event_type="status_changed",
+                event_type=LogEventType.STATUS_CHANGED,
                 event_data={"old_status": old_status.value, "new_status": status.value},
                 actor_id=actor_id,
             )
@@ -318,7 +408,7 @@ class ReportService:
             base_query = select(Report).where(Report.deleted_at.is_(None))
 
             if reporter_id:
-                base_query = base_query.where(Report.reporter_id == reporter_id)
+                base_query = base_query.where(Report.reporter_nullifier == reporter_id)
 
             # Total
             total_result = await db.execute(
