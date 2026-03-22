@@ -4,8 +4,8 @@
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-dotenv==1.0.0
-pydantic==2.5.3
-pydantic-settings==2.1.0
+pydantic==2.7.4
+pydantic-settings==2.3.0
 
 # ===== Database =====
 sqlalchemy==2.0.25
@@ -24,10 +24,11 @@ eth-utils==3.0.0
 eth-hash[pycryptodome]>=0.5.2
 
 # ===== IPFS =====
-ipfshttpclient==0.8.0a2
+# ipfshttpclient removed — abandoned, fails on Python 3.12+
+# Use httpx to call IPFS HTTP API directly
 
 # ===== Cryptography =====
-cryptography==41.0.7
+cryptography>=42.0.0
 pycryptodome==3.20.0
 
 # ===== API & HTTP =====
@@ -36,8 +37,7 @@ aiohttp==3.9.1
 python-multipart==0.0.6
 
 # ===== Security =====
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
+PyJWT[crypto]>=2.8.0
 bcrypt==4.1.2
 siwe==4.2.0
 
@@ -48,7 +48,6 @@ slowapi==0.1.9
 pytest==7.4.4
 pytest-asyncio==0.23.3
 pytest-cov==4.1.0
-httpx==0.26.0
 
 # ===== Development =====
 black==23.12.1
@@ -62,7 +61,7 @@ sentry-sdk==1.39.2
 
 # ===== Week 8: Security =====
 bleach>=6.0.0
-python-magic>=0.4.27
+python-magic-bin>=0.4.14
 Pillow>=10.0.0
 PyPDF2>=3.0.0
 
