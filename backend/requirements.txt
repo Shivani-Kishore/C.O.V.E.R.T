@@ -38,6 +38,7 @@ python-multipart==0.0.6
 
 # ===== Security =====
 PyJWT[crypto]>=2.8.0
+python-jose[cryptography]==3.3.0
 bcrypt==4.1.2
 siwe==4.2.0
 
