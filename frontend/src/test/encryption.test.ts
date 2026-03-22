@@ -296,6 +296,7 @@ describe('EncryptionService', () => {
       await encryptionService.storeKey(cid, key, walletAddress, signature);
       const retrievedKey = await encryptionService.retrieveKey(cid, signature);
 
+      if (!retrievedKey) throw new Error('Expected retrievedKey to be defined');
       expect(bytesToBase64(retrievedKey)).toBe(bytesToBase64(key));
     });
 
