@@ -18,9 +18,9 @@ redis==5.0.1
 celery==5.3.4
 
 # ===== Web3 & Blockchain =====
-web3==6.20.3
-eth-account==0.13.0
-eth-utils==3.0.0
+web3>=6.17.0
+eth-account>=0.8.0,<0.13
+eth-utils>=2.0.0
 eth-hash[pycryptodome]>=0.5.2
 
 # ===== IPFS =====
