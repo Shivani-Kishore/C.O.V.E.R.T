@@ -28,6 +28,58 @@ import { protocolService } from '../services/protocol';
 import { useCovBalanceStore } from '../stores/covBalanceStore';
 import type { WalletState } from '../services/web3';
 
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
+/**
+ * Perform SIWE authentication: fetch nonce, sign message, verify with backend, store JWT.
+ */
+async function authenticateWithSIWE(address: string): Promise<void> {
+  try {
+    // 1. Get nonce
+    const nonceRes = await fetch(`${API_BASE}/api/v1/auth/nonce?address=${address}`);
+    if (!nonceRes.ok) throw new Error('Failed to fetch nonce');
+    const { nonce } = await nonceRes.json();
+
+    // 2. Build SIWE message
+    const domain = window.location.host;
+    const origin = window.location.origin;
+    const issuedAt = new Date().toISOString();
+    const message = [
+      `${domain} wants you to sign in with your Ethereum account:`,
+      address,
+      '',
+      'Sign in to C.O.V.E.R.T',
+      '',
+      `URI: ${origin}`,
+      'Version: 1',
+      `Chain ID: ${parseInt(import.meta.env.VITE_CHAIN_ID || '84532')}`,
+      `Nonce: ${nonce}`,
+      `Issued At: ${issuedAt}`,
+    ].join('\n');
+
+    // 3. Sign with wallet
+    const signature = await web3Service.signMessage(message);
+
+    // 4. Verify with backend
+    const verifyRes = await fetch(`${API_BASE}/api/v1/auth/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, signature }),
+    });
+    if (!verifyRes.ok) {
+      const err = await verifyRes.json().catch(() => ({ detail: 'Verification failed' }));
+      throw new Error(err.detail || 'SIWE verification failed');
+    }
+
+    const { token } = await verifyRes.json();
+    localStorage.setItem('token', token);
+  } catch (err) {
+    console.error('[SIWE] Authentication failed:', err);
+    // Don't block wallet connection — just log the error.
+    // Authenticated endpoints will prompt re-auth if needed.
+  }
+}
+
 interface UseWeb3Return {
   walletState: WalletState;
   isConnecting: boolean;
@@ -167,6 +219,8 @@ export function useWeb3(): UseWeb3Return {
       const state = await web3Service.connect(walletType, wasLoggedOut);
       if (state.address) {
         session.saveSession(state.address, state.chainId, state.balance);
+        // Authenticate with backend via SIWE to get a JWT
+        await authenticateWithSIWE(state.address);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect wallet';
@@ -190,6 +244,7 @@ export function useWeb3(): UseWeb3Return {
 
     web3Service.disconnect();
     session.clearSession();
+    localStorage.removeItem('token');
     setError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
