@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
     # ===== CORS =====
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000", "https://covert-chi.vercel.app"]
 
     # ===== Database =====
     DATABASE_URL: str = "postgresql+asyncpg://covert_user:covert_password@localhost:5432/covert_db"
@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     # ===== File Upload =====
     MAX_FILE_SIZE: int = 100 * 1024 * 1024  # 100 MB
     ALLOWED_EXTENSIONS: List[str] = [".jpg", ".jpeg", ".png", ".pdf", ".mp4", ".zip"]
+
+    # ===== Email (Gmail SMTP) =====
+    GMAIL_ADDRESS: str = ""
+    GMAIL_APP_PASSWORD: str = ""
+    FRONTEND_URL: str = "http://localhost:5173"
+
+    # ===== Routing =====
+    FOLLOWUP_DAYS: int = 7  # days between followup emails to non-responsive departments
 
     # ===== Monitoring =====
     SENTRY_DSN: str = ""

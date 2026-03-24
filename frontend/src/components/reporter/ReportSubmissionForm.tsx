@@ -93,11 +93,60 @@ export function ReportSubmissionForm() {
   const { commitReport, connect, walletState } = useWeb3();
   const isConnected = walletState.connected;
   const { deductStake } = useCovBalanceStore();
+  const [walletTxCount, setWalletTxCount] = useState<number | null>(null);
+  const [routingPreview, setRoutingPreview] = useState<{
+    is_bangalore: boolean;
+    category: string;
+    departments: { name: string; short_name: string }[];
+  } | null>(null);
+  const [routingLoading, setRoutingLoading] = useState(false);
 
   useEffect(() => {
     resetSubmission();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Debounced routing preview based on description text
+  useEffect(() => {
+    const text = `${draft.title} ${draft.description}`.trim();
+    if (text.length < 20) {
+      setRoutingPreview(null);
+      return;
+    }
+    setRoutingLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/v1/routing/preview?text=${encodeURIComponent(text)}`
+        );
+        if (res.ok) {
+          setRoutingPreview(await res.json());
+        }
+      } catch {
+        // ignore
+      } finally {
+        setRoutingLoading(false);
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [draft.title, draft.description]);
+
+  // Check wallet tx count for anonymity warning
+  useEffect(() => {
+    if (!isConnected || !walletState.address) {
+      setWalletTxCount(null);
+      return;
+    }
+    (async () => {
+      try {
+        const provider = new ethers.BrowserProvider((window as any).ethereum);
+        const count = await provider.getTransactionCount(walletState.address!);
+        setWalletTxCount(count);
+      } catch {
+        setWalletTxCount(null);
+      }
+    })();
+  }, [isConnected, walletState.address]);
 
   const validateStep = useCallback((step: number): boolean => {
     const newErrors: FormErrors = {};
@@ -212,6 +261,7 @@ export function ReportSubmissionForm() {
           size_bytes: ipfsResult.size,
           title: draft.title,
           description: draft.description,
+          ...(draft.delayHours > 0 ? { delay_hours: draft.delayHours } : {}),
         }),
       });
 
@@ -463,6 +513,43 @@ export function ReportSubmissionForm() {
           <p className="text-sm text-neutral-500 font-medium">{draft.description.length}/5000</p>
         </div>
       </div>
+
+      {/* Routing Preview */}
+      {(draft.title + draft.description).trim().length >= 20 && (
+        <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl">
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">
+            Department Routing Preview
+            {routingLoading && (
+              <span className="ml-2 inline-block w-3 h-3 border-2 border-neutral-600 border-t-neutral-300 rounded-full animate-spin align-middle" />
+            )}
+          </p>
+          {routingPreview && !routingLoading && (
+            <>
+              {!routingPreview.is_bangalore ? (
+                <p className="text-xs text-neutral-500">
+                  Location not detected as Bangalore — no automatic routing.
+                </p>
+              ) : routingPreview.departments.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  <span className="text-xs text-neutral-400">This report will be routed to:</span>
+                  {routingPreview.departments.map((d) => (
+                    <span
+                      key={d.short_name}
+                      className="text-xs px-2.5 py-1 rounded-full bg-neutral-800 text-neutral-300 font-medium"
+                    >
+                      {d.name}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-neutral-500">
+                  No matching department found for the detected category.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 
@@ -534,6 +621,44 @@ export function ReportSubmissionForm() {
         })}
       </div>
 
+      {/* Submission Delay */}
+      <div>
+        <h3 className="text-lg font-semibold text-white mb-2">Schedule Submission Delay</h3>
+        <p className="text-sm text-neutral-500 mb-4">
+          Recommended for sensitive reports. Adds a time buffer between your activity and the on-chain record.
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { value: 0, label: 'Immediately' },
+            { value: 6, label: '6 hours' },
+            { value: 24, label: '24 hours' },
+            { value: 72, label: '72 hours' },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => updateDraft({ delayHours: opt.value })}
+              className={`px-4 py-3 rounded-xl border text-sm font-medium transition-all duration-200 ${
+                draft.delayHours === opt.value
+                  ? 'bg-neutral-800 text-white'
+                  : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 bg-neutral-900'
+              }`}
+              style={draft.delayHours === opt.value ? { borderColor: '#E84B1A' } : {}}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {draft.delayHours > 0 && (
+          <div className="mt-3 p-3 bg-neutral-900 border border-neutral-800 rounded-lg">
+            <p className="text-xs text-neutral-400">
+              Your report will be encrypted and stored immediately, but the blockchain commitment will be
+              published ~{draft.delayHours} hours after submission.
+            </p>
+          </div>
+        )}
+      </div>
+
       <div className="p-5 bg-green-950/20 border border-green-900/50 rounded-xl">
         <div className="flex items-start">
           <ShieldCheckIcon className="h-6 w-6 text-green-500 mt-0.5 mr-3 flex-shrink-0" />
@@ -595,6 +720,15 @@ export function ReportSubmissionForm() {
             )}
           </div>
         </div>
+
+        {draft.delayHours > 0 && (
+          <div className="border-t border-neutral-800 pt-4">
+            <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Submission Delay</p>
+            <p className="font-semibold text-white mt-1.5">
+              {draft.delayHours} hours
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Wallet Status */}
@@ -614,6 +748,23 @@ export function ReportSubmissionForm() {
               >
                 Connect Wallet
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Wallet anonymity warning */}
+      {isConnected && walletTxCount !== null && walletTxCount > 5 && (
+        <div className="p-5 bg-amber-950/20 border border-amber-900/50 rounded-xl">
+          <div className="flex items-start">
+            <ExclamationTriangleIcon className="h-6 w-6 text-amber-500 mt-0.5 mr-3 flex-shrink-0" />
+            <div className="text-sm text-amber-400">
+              <p className="font-semibold text-amber-300">Anonymity Warning</p>
+              <p className="mt-1.5 leading-relaxed">
+                This wallet has <span className="font-bold text-amber-200">{walletTxCount}</span> prior transactions.
+                Using a wallet with transaction history may make it easier to link your identity.
+                For maximum anonymity, consider using a fresh burner wallet.
+              </p>
             </div>
           </div>
         </div>

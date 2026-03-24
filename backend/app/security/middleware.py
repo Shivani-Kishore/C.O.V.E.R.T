@@ -71,11 +71,10 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
 
         request_id = request.headers.get('X-Request-ID', 'unknown')
-        identifier = rate_limiter.get_identifier(request)
 
         logger.info(
             f"Request started: {request.method} {request.url.path} "
-            f"[ID: {request_id}, Client: {identifier}]"
+            f"[ID: {request_id}]"
         )
 
         try:

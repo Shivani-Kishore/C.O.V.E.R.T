@@ -9,6 +9,9 @@ from sqlalchemy import select, func
 from typing import Optional, List
 from datetime import datetime
 from uuid import UUID
+import logging
+
+logger = logging.getLogger(__name__)
 
 # keccak256 for CID hash verification (matches ethers.keccak256 on the frontend)
 try:
@@ -117,6 +120,7 @@ async def submit_report(
             reporter_id=identifier,
             title=report_data.title,
             description=report_data.description,
+            delay_hours=report_data.delay_hours,
         )
 
         return ReportResponse(
@@ -131,6 +135,7 @@ async def submit_report(
             visibility=report.visibility.value if hasattr(report.visibility, 'value') else str(report.visibility),
             size_bytes=report.file_size,
             submitted_at=report.submission_timestamp,
+            scheduled_for=report.scheduled_for,
             message="Report submitted successfully"
         )
 
@@ -273,7 +278,6 @@ async def list_all_reports(
             risk_level=r.risk_level.value if r.risk_level and hasattr(r.risk_level, 'value') else r.risk_level,
             submitted_at=r.submission_timestamp,
             reviewed_at=None,
-            reporter=r.reporter_nullifier,
             review_decision=r.review_decision,
         )
         for r in reports
@@ -430,6 +434,13 @@ async def finalize_report(
     # ── Reviewer penalty: appeal overturned the reviewer's decision ──
     if body.appeal_outcome == 'APPEAL_WON' and reviewer_addr:
         await reputation_service.apply_reviewer_appeal_penalty(db, reviewer_addr)
+
+    # ── Route corroborated reports to civic departments ──
+    if body.final_label == 'CORROBORATED':
+        import asyncio
+        from app.services.routing_service import route_report
+        report_text = f"{report.encrypted_title or ''} {report.encrypted_summary or ''}"
+        asyncio.create_task(route_report(str(report.id), report_text, db))
 
     return {"id": str(report.id), "status": report.status.value}
 

@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
     ShieldCheckIcon,
     LockClosedIcon,
@@ -22,6 +22,7 @@ import {
     ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 import { useWeb3 } from '@/hooks/useWeb3';
+import { AnonymousWalletModal } from '@/components/AnonymousWalletModal';
 
 // ─────────── Blockchain Network Canvas ───────────
 
@@ -269,6 +270,7 @@ export function LandingPage() {
     const { connect, walletState } = useWeb3();
     const isConnected = walletState.connected;
     const [connecting, setConnecting] = useState(false);
+    const [walletModalOpen, setWalletModalOpen] = useState(false);
     const containerRef = useScrollReveal();
 
     const handleConnect = async () => {
@@ -563,10 +565,26 @@ export function LandingPage() {
                             <ShieldCheckIcon className="h-8 w-8" style={{ color: ORANGE }} />
                         </div>
                         <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">Ready to Report?</h2>
-                        <p className="text-neutral-400 text-sm mb-10 leading-relaxed max-w-lg mx-auto">
+                        <p className="text-neutral-400 text-sm mb-6 leading-relaxed max-w-lg mx-auto">
                             Your identity is protected by cryptography, not promises.
                             Connect your wallet to enter the platform and start making a difference.
                         </p>
+
+                        <div className="flex items-center justify-center gap-4 mb-10">
+                            <button
+                                onClick={() => setWalletModalOpen(true)}
+                                className="text-sm font-medium px-5 py-2.5 rounded-lg border border-neutral-700 text-neutral-300 hover:text-white hover:border-neutral-500 transition-colors"
+                            >
+                                Set Up Anonymous Wallet
+                            </button>
+                            <Link
+                                to="/privacy-guide"
+                                className="text-sm font-medium hover:underline"
+                                style={{ color: ORANGE }}
+                            >
+                                Privacy Guide →
+                            </Link>
+                        </div>
 
                         {isConnected ? (
                             <button
@@ -600,6 +618,9 @@ export function LandingPage() {
                     </div>
                 </div>
             </section>
+
+            {/* Anonymous Wallet Setup Modal */}
+            <AnonymousWalletModal open={walletModalOpen} onClose={() => setWalletModalOpen(false)} />
 
             {/* ──────────── FOOTER ──────────── */}
             <footer className="border-t border-neutral-900 py-8 px-6 bg-black">

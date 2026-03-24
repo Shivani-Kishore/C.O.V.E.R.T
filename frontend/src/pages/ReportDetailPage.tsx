@@ -29,6 +29,7 @@ import { ethers } from 'ethers';
 import { STAKES } from '@/types/protocol';
 import { toast } from 'react-hot-toast';
 import { API_BASE } from '@/config';
+import { DepartmentRouting } from '@/components/DepartmentRouting';
 
 const statusConfig = {
   pending:      { label: 'Pending',      color: 'bg-yellow-900/40 text-yellow-400', icon: ClockIcon },
@@ -702,6 +703,9 @@ export function ReportDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Departments Notified */}
+      <DepartmentRouting reportId={report.id} />
 
       {/* Appeal — shown when report has been reviewed and user disagrees */}
       {reports.some((r) => r.id === report.id) && (

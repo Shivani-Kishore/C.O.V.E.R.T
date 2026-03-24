@@ -208,8 +208,7 @@ class DMSCheckIn(Base):
         index=True
     )
     proof_of_life = Column(String(200))  # Optional message/proof
-    ip_address_hash = Column(String(64))
-    user_agent_hash = Column(String(64))
+    # IP/UA intentionally NOT stored — reporter privacy
 
     # ZKP Verification
     zkp_nullifier = Column(String(66))

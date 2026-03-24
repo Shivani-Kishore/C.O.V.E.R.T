@@ -7,3 +7,6 @@ export { SubmitReport } from './SubmitReport';
 export { ReviewerDashboard } from './ReviewerDashboard';
 export { ProtocolModeratorDashboard } from './ProtocolModeratorDashboard';
 export { LandingPage } from './LandingPage';
+export { PrivacyGuide } from './PrivacyGuide';
+export { DeptResponsePage } from './DeptResponsePage';
+export { AccountabilityPage } from './AccountabilityPage';

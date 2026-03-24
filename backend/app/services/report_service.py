@@ -6,7 +6,7 @@ Business logic for report management
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from typing import Optional, List, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 import logging
 
@@ -31,6 +31,7 @@ class ReportService:
         reporter_id: str,
         title: Optional[str] = None,
         description: Optional[str] = None,
+        delay_hours: Optional[int] = None,
     ) -> Report:
         """Create a new report"""
         try:
@@ -59,6 +60,9 @@ class ReportService:
                 reporter_nullifier=reporter_id,
                 # Timestamps
                 submission_timestamp=datetime.utcnow(),
+                # Scheduled submission delay
+                scheduled_for=datetime.utcnow() + timedelta(hours=delay_hours) if delay_hours else None,
+                chain_submitted=not bool(delay_hours),
                 # Chain — default to local Anvil; can be overridden via env
                 chain_id=settings.CHAIN_ID,
                 status=ReportStatus.PENDING,

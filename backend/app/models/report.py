@@ -172,6 +172,10 @@ class Report(Base):
     reviewer_address = Column(String(42))
     review_decision = Column(String(20))  # 'REVIEW_PASSED' | 'NEEDS_EVIDENCE' | 'REJECT_SPAM' | None
 
+    # Scheduled Submission (delayed publishing for reporter safety)
+    scheduled_for = Column(DateTime(timezone=True))
+    chain_submitted = Column(Boolean, nullable=False, default=True)
+
     # Dead Man's Switch
     dms_enabled = Column(Boolean, default=False)
     dms_trigger_date = Column(DateTime(timezone=True))
@@ -267,9 +271,7 @@ class ReportLog(Base):
     new_value = Column(Text)
     field_changed = Column(String(100))
 
-    # Context
-    ip_address_hash = Column(String(64))
-    user_agent_hash = Column(String(64))
+    # Context (IP/UA intentionally NOT stored — reporter privacy)
 
     # Timestamp
     created_at = Column(

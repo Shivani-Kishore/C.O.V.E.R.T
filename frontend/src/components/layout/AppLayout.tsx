@@ -13,6 +13,8 @@ import {
   XMarkIcon,
   ArrowLeftIcon,
   InformationCircleIcon,
+  ShieldCheckIcon,
+  BuildingOffice2Icon,
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { WalletButton } from '../WalletButton';
@@ -48,6 +50,8 @@ export function AppLayout() {
     { to: '/dashboard', icon: HomeIcon, label: 'Dashboard' },
     { to: '/submit', icon: DocumentPlusIcon, label: 'Submit Report' },
     { to: '/my-reports', icon: ClipboardDocumentListIcon, label: 'My Reports' },
+    { to: '/accountability', icon: BuildingOffice2Icon, label: 'Accountability' },
+    { to: '/privacy-guide', icon: ShieldCheckIcon, label: 'Privacy Guide' },
   ];
 
   return (

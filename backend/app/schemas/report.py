@@ -17,6 +17,7 @@ class ReportCreate(BaseModel):
     size_bytes: int = Field(..., gt=0, description="Size of encrypted data")
     title: Optional[str] = Field(None, max_length=500, description="Report title (plaintext for reviewer display)")
     description: Optional[str] = Field(None, max_length=10000, description="Report description (plaintext for reviewer display)")
+    delay_hours: Optional[int] = Field(None, ge=0, le=72, description="Delay before blockchain submission (0/6/24/72 hours)")
 
     @field_validator("cid")
     @classmethod
@@ -56,6 +57,7 @@ class ReportResponse(BaseModel):
     risk_level: Optional[str] = None
     submitted_at: datetime
     reviewed_at: Optional[datetime] = None
+    scheduled_for: Optional[datetime] = None
     message: Optional[str] = None
 
     model_config = {"from_attributes": True}

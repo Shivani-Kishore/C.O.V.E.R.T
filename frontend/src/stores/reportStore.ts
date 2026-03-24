@@ -44,6 +44,7 @@ export interface ReportDraft {
   title: string;
   description: string;
   visibility: ReportVisibility;
+  delayHours: number;
   files: File[];
   fileMetadata: FileMetadata[];
 }
@@ -126,6 +127,7 @@ const initialDraft: ReportDraft = {
   title: '',
   description: '',
   visibility: 'moderated',
+  delayHours: 0,
   files: [],
   fileMetadata: [],
 };

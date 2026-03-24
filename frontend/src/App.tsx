@@ -13,6 +13,9 @@ import { ReviewerDashboard } from './pages/ReviewerDashboard';
 import { ProtocolModeratorDashboard } from './pages/ProtocolModeratorDashboard';
 import { useRoleAccess } from './hooks/useRoleAccess';
 import { ReportDetailPage } from './pages/ReportDetailPage';
+import { PrivacyGuide } from './pages/PrivacyGuide';
+import { DeptResponsePage } from './pages/DeptResponsePage';
+import { AccountabilityPage } from './pages/AccountabilityPage';
 
 /** Renders the role-appropriate dashboard at the single /dashboard route. */
 function DashboardPage() {
@@ -65,9 +68,18 @@ function App() {
           <Route path="/moderation/stats" element={<Navigate to="/dashboard" replace />} />
           <Route path="/protocol-moderator" element={<Navigate to="/dashboard" replace />} />
 
+          {/* Privacy guide — no wallet needed */}
+          <Route path="/privacy-guide" element={<PrivacyGuide />} />
+
           {/* Report detail page */}
           <Route path="/report/:id" element={<ReportDetailPage />} />
+
+          {/* Accountability dashboard — public */}
+          <Route path="/accountability" element={<AccountabilityPage />} />
         </Route>
+
+        {/* Department response — standalone, no AppLayout, no wallet */}
+        <Route path="/dept-response/:token" element={<DeptResponsePage />} />
 
         {/* 404 fallback */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

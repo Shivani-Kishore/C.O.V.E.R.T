@@ -27,6 +27,13 @@ export function SubmitReport() {
             <p className="text-neutral-400 mt-2 text-lg">
               Your submission will be encrypted and stored securely on IPFS and blockchain.
             </p>
+            <p className="text-neutral-500 mt-2 text-sm">
+              For maximum anonymity, read our{' '}
+              <Link to="/privacy-guide" className="text-[#E84B1A] hover:underline font-medium">
+                Privacy Guide
+              </Link>{' '}
+              before submitting.
+            </p>
           </div>
           <div className="flex items-center text-sm font-semibold px-4 py-2 rounded-full border"
                style={{ color: '#E84B1A', backgroundColor: 'rgba(232,75,26,0.08)', borderColor: 'rgba(232,75,26,0.3)' }}>
