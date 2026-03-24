@@ -16,6 +16,8 @@ from app.core.database import init_db, close_db, engine
 
 
 # ── Rate limiter (backed by Redis when REDIS_URL is set) ────────────────────
+# Privacy note: IP addresses are used transiently for rate-limit buckets only.
+# They are NEVER logged, stored in the database, or included in API responses.
 def _get_limiter_key(request: Request) -> str:
     """Use the authenticated wallet address if available, otherwise fall back to IP."""
     wallet = request.headers.get("X-Wallet-Address")
@@ -99,7 +101,7 @@ async def health_check():
 
 
 # Import and include routers
-from app.api.v1 import auth, reports, moderation, reputation, zkp, ai_analysis, dms, moderation_notes, dev
+from app.api.v1 import auth, reports, moderation, reputation, zkp, ai_analysis, dms, moderation_notes, dev, routing
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(reports.router, prefix="/api/v1")
@@ -109,6 +111,7 @@ app.include_router(zkp.router, prefix="/api/v1")
 app.include_router(ai_analysis.router, prefix="/api/v1")
 app.include_router(dms.router, prefix="/api/v1")
 app.include_router(moderation_notes.router, prefix="/api/v1")
+app.include_router(routing.router, prefix="/api/v1")
 if settings.DEBUG and settings.ENVIRONMENT == "development":
     app.include_router(dev.router, prefix="/api/v1")
 
