@@ -33,6 +33,8 @@ limiter = Limiter(key_func=_get_limiter_key, storage_uri=_storage_uri)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle startup and shutdown events"""
+    import logging
+    logging.getLogger(__name__).info(f"CORS_ORIGINS: {settings.CORS_ORIGINS}")
     # Startup
     await init_db()
     yield
@@ -65,6 +67,18 @@ app.add_middleware(
 
 # GZip Middleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+# Global exception handler — ensures unhandled 500s still return a proper
+# JSON response so the CORS middleware can attach its headers.
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import logging
+    logging.getLogger(__name__).error(f"Unhandled error on {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 @app.get("/")
