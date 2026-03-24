@@ -78,8 +78,14 @@ class Settings(BaseSettings):
     @validator("CORS_ORIGINS", pre=True)
     def parse_cors_origins(cls, v):
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
+            origins = [origin.strip() for origin in v.split(",")]
+        else:
+            origins = list(v)
+        # Always include the production frontend
+        vercel = "https://covert-chi.vercel.app"
+        if vercel not in origins:
+            origins.append(vercel)
+        return origins
 
     class Config:
         env_file = ".env"
