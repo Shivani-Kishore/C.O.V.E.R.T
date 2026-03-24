@@ -618,6 +618,9 @@ class IPFSService implements IIPFSService {
 export const ipfsService = new IPFSService();
 
 // Auto-configure from Vite env variables at import time
+console.log('[IPFS] VITE_PINATA_API_KEY:', import.meta.env.VITE_PINATA_API_KEY ? 'SET (' + import.meta.env.VITE_PINATA_API_KEY.slice(0, 6) + '...)' : 'EMPTY');
+console.log('[IPFS] VITE_PINATA_SECRET_KEY:', import.meta.env.VITE_PINATA_SECRET_KEY ? 'SET' : 'EMPTY');
+console.log('[IPFS] VITE_DEV_MODE:', import.meta.env.VITE_DEV_MODE);
 ipfsService.configure({
   pinataApiKey: import.meta.env.VITE_PINATA_API_KEY || '',
   pinataSecretKey: import.meta.env.VITE_PINATA_SECRET_KEY || '',
