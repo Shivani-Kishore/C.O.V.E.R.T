@@ -6,7 +6,20 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 // Types
-export type ReportStatus = 'pending' | 'under_review' | 'verified' | 'rejected' | 'disputed';
+export type ReportStatus =
+  // New lifecycle statuses (v2)
+  | 'pending_review'         // submitted, awaiting reviewer
+  | 'needs_evidence'         // reviewer returned: needs more evidence
+  | 'rejected_by_reviewer'   // reviewer flagged as spam/reject
+  | 'pending_moderation'     // reviewer passed; awaiting moderator
+  | 'appealed'               // reporter appealed reviewer decision
+  | 'verified'               // moderator approved
+  | 'rejected'               // moderator rejected
+  | 'archived'
+  // Legacy statuses (backward compat)
+  | 'pending'
+  | 'under_review'
+  | 'disputed';
 export type ReportVisibility = 'private' | 'moderated' | 'public';
 export type ReportCategory = 'corruption' | 'fraud' | 'safety' | 'environment' | 'human_rights' | 'other';
 

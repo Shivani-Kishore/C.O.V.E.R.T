@@ -33,12 +33,19 @@ from app.core.database import Base
 
 class ReportStatus(str, Enum):
     """Report status values"""
+    # ── New lifecycle statuses (v2) ──────────────────────────────────────
+    PENDING_REVIEW = "pending_review"              # submitted, awaiting reviewer
+    NEEDS_EVIDENCE = "needs_evidence"              # reviewer returned: needs more evidence
+    REJECTED_BY_REVIEWER = "rejected_by_reviewer"  # reviewer flagged as spam/reject
+    PENDING_MODERATION = "pending_moderation"      # reviewer passed; awaiting moderator
+    APPEALED = "appealed"                          # reporter appealed reviewer decision
+    VERIFIED = "verified"                          # moderator approved
+    REJECTED = "rejected"                          # moderator rejected
+    ARCHIVED = "archived"
+    # ── Legacy statuses (backward compat for existing rows) ──────────────
     PENDING = "pending"
     UNDER_REVIEW = "under_review"
-    VERIFIED = "verified"
-    REJECTED = "rejected"
     DISPUTED = "disputed"
-    ARCHIVED = "archived"
 
 
 class ReportVisibility(str, Enum):
@@ -138,7 +145,7 @@ class Report(Base):
     status = Column(
         SQLEnum(ReportStatus, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
-        default=ReportStatus.PENDING,
+        default=ReportStatus.PENDING_REVIEW,
         index=True
     )
     verification_score = Column(Numeric(3, 2))  # 0.00 - 1.00
@@ -213,7 +220,7 @@ class Report(Base):
             name="commitment_format"
         ),
         CheckConstraint(
-            "chain_id IN (137, 42161, 80001, 421613, 31337)",
+            "chain_id IN (137, 42161, 80001, 421613, 31337, 84532)",
             name="valid_chain"
         ),
         Index("idx_reports_status_active", status, postgresql_where=(deleted_at.is_(None))),

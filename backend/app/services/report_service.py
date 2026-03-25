@@ -24,7 +24,7 @@ class ReportService:
         db: AsyncSession,
         cid: str,
         cid_hash: str,
-        tx_hash: str,
+        tx_hash: Optional[str],
         category: str,
         visibility: int,
         size_bytes: int,
@@ -65,7 +65,7 @@ class ReportService:
                 chain_submitted=not bool(delay_hours),
                 # Chain — default to local Anvil; can be overridden via env
                 chain_id=settings.CHAIN_ID,
-                status=ReportStatus.PENDING,
+                status=ReportStatus.PENDING_REVIEW,
             )
 
             db.add(report)

@@ -62,6 +62,8 @@ interface ModerableReport {
     stake: number;
     appealBond: number;
     lockedReportStake: bigint;
+    /** Original DB status — only set when reports come from DB fallback, not blockchain */
+    dbStatus?: string;
 }
 
 interface WalletRepData {
@@ -1061,10 +1063,19 @@ export function ProtocolModeratorDashboard() {
                         'NEEDS_EVIDENCE': ReviewerDecision.NEEDS_EVIDENCE,
                         'REJECT_SPAM': ReviewerDecision.REJECT_SPAM,
                     };
+                    // Map DB status → FinalLabel for display purposes
                     const DB_STATUS_TO_FINAL_LABEL: Record<string, FinalLabel> = {
                         'verified': FinalLabel.CORROBORATED,
                         'rejected': FinalLabel.FALSE_OR_MANIPULATED,
                         'disputed': FinalLabel.DISPUTED,
+                    };
+                    // Infer reviewDecision from DB status when review_decision field is absent
+                    const STATUS_TO_REVIEW_DECISION: Record<string, ReviewerDecision> = {
+                        'pending_moderation': ReviewerDecision.REVIEW_PASSED,
+                        'appealed': ReviewerDecision.REVIEW_PASSED,
+                        'under_review': ReviewerDecision.REVIEW_PASSED,
+                        'needs_evidence': ReviewerDecision.NEEDS_EVIDENCE,
+                        'rejected_by_reviewer': ReviewerDecision.REJECT_SPAM,
                     };
                     const dbReports: ModerableReport[] = (data.items || []).map(
                         (r: { reporter?: string; visibility: string; cid_hash?: string; submitted_at?: string; status?: string; review_decision?: string }, idx: number) => ({
@@ -1073,18 +1084,21 @@ export function ProtocolModeratorDashboard() {
                             visibility: r.visibility === 'public' ? 'PUBLIC' : 'PRIVATE' as 'PUBLIC' | 'PRIVATE',
                             contentHash: r.cid_hash || '',
                             finalLabel: (r.status && DB_STATUS_TO_FINAL_LABEL[r.status]) ?? FinalLabel.UNREVIEWED,
-                            reviewDecision: (r.review_decision && DB_REVIEW_DECISION[r.review_decision]) ?? ReviewerDecision.NONE,
+                            reviewDecision: (r.review_decision && DB_REVIEW_DECISION[r.review_decision])
+                                ?? (r.status && STATUS_TO_REVIEW_DECISION[r.status])
+                                ?? ReviewerDecision.NONE,
                             createdAt: r.submitted_at ? new Date(r.submitted_at).getTime() / 1000 : Date.now() / 1000,
                             reviewedAt: 0,
                             supportCount: 0,
                             challengeCount: 0,
                             supporters: [],
                             challengers: [],
-                            hasAppeal: false,
+                            hasAppeal: r.status === 'appealed',
                             appealReasonHash: '',
                             stake: r.visibility === 'public' ? STAKES.REPORT_PUBLIC : STAKES.REPORT_PRIVATE,
-                            appealBond: 0,
+                            appealBond: r.status === 'appealed' ? STAKES.APPEAL_BOND : 0,
                             lockedReportStake: 0n,
+                            dbStatus: r.status,
                         })
                     );
                     setReports(dbReports);
@@ -1314,8 +1328,20 @@ export function ProtocolModeratorDashboard() {
             !moderatorAddress || r.reporter.toLowerCase() !== moderatorAddress.toLowerCase()
         );
 
-        // Filter — "pending" shows all unfinalized reports (reviewed or not)
-        if (filterKey === 'pending') list = list.filter(r => r.finalLabel === FinalLabel.UNREVIEWED);
+        // Filter — in DB mode, "pending" shows only reports awaiting moderation
+        // (pending_moderation + appealed). In blockchain mode, use finalLabel as before.
+        if (filterKey === 'pending') {
+            if (!fromBlockchain) {
+                // DB fallback: only show reports the moderator should act on
+                list = list.filter(r =>
+                    r.dbStatus === 'pending_moderation' ||
+                    r.dbStatus === 'appealed' ||
+                    r.dbStatus === 'under_review'  // legacy
+                );
+            } else {
+                list = list.filter(r => r.finalLabel === FinalLabel.UNREVIEWED);
+            }
+        }
         else if (filterKey === 'finalized') list = list.filter(r => r.finalLabel !== FinalLabel.UNREVIEWED);
         else if (filterKey === 'appealed') list = list.filter(r => r.hasAppeal && r.finalLabel === FinalLabel.UNREVIEWED);
         else if (filterKey === 'review_passed') list = list.filter(r => r.reviewDecision === ReviewerDecision.REVIEW_PASSED && r.finalLabel === FinalLabel.UNREVIEWED);
@@ -1336,7 +1362,9 @@ export function ProtocolModeratorDashboard() {
         !moderatorAddress || r.reporter.toLowerCase() !== moderatorAddress.toLowerCase()
     );
     const appealsQueue = reviewableReports.filter(r => r.hasAppeal && r.finalLabel === FinalLabel.UNREVIEWED);
-    const pendingCount = reviewableReports.filter(r => r.finalLabel === FinalLabel.UNREVIEWED && r.reviewDecision !== ReviewerDecision.NONE).length;
+    const pendingCount = fromBlockchain
+        ? reviewableReports.filter(r => r.finalLabel === FinalLabel.UNREVIEWED && r.reviewDecision !== ReviewerDecision.NONE).length
+        : reviewableReports.filter(r => r.dbStatus === 'pending_moderation' || r.dbStatus === 'appealed' || r.dbStatus === 'under_review').length;
     const appealCount = appealsQueue.length;
     const finalizedCount = reviewableReports.filter(r => r.finalLabel !== FinalLabel.UNREVIEWED).length;
     const totalCov = reviewableReports.reduce((sum, r) => sum + (r.finalLabel === FinalLabel.UNREVIEWED ? totalCovAtRisk(r) : 0), 0);

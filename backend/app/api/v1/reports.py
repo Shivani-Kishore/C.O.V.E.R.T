@@ -88,8 +88,8 @@ async def submit_report(
     """
     identifier = wallet
 
-    # Validate transaction hash format
-    if not report_data.tx_hash.startswith("0x") or len(report_data.tx_hash) != 66:
+    # Validate transaction hash format (tx_hash is optional — set later via /{id}/commit)
+    if report_data.tx_hash and (not report_data.tx_hash.startswith("0x") or len(report_data.tx_hash) != 66):
         raise HTTPException(status_code=400, detail="Invalid transaction hash format")
 
     # Verify CID hash matches (frontend uses ethers.keccak256)
@@ -443,6 +443,47 @@ async def finalize_report(
         asyncio.create_task(route_report(str(report.id), report_text, db))
 
     return {"id": str(report.id), "status": report.status.value}
+
+
+@router.post("/by-hash/{cid_hash}/resubmit")
+async def resubmit_report(
+    cid_hash: str,
+    wallet: str = Depends(get_current_wallet),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Allow the reporter to resubmit a report that was returned by a reviewer.
+
+    Valid for reports in 'needs_evidence' or 'rejected_by_reviewer' status.
+    Resets status back to 'pending_review' and clears the review decision
+    so it re-enters the reviewer queue from scratch.
+
+    Only the original reporter may call this endpoint.
+    """
+    normalized = cid_hash.lower() if cid_hash.startswith("0x") else f"0x{cid_hash.lower()}"
+    result = await db.execute(select(Report).where(Report.commitment_hash == normalized))
+    report = result.scalar_one_or_none()
+
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    if (report.reporter_nullifier or "").lower() != wallet.lower():
+        raise HTTPException(status_code=403, detail="Only the reporter may resubmit this report")
+
+    allowed_statuses = {ReportStatus.NEEDS_EVIDENCE, ReportStatus.REJECTED_BY_REVIEWER}
+    if report.status not in allowed_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Resubmit not allowed for status '{report.status.value}'. "
+                   f"Only 'needs_evidence' and 'rejected_by_reviewer' reports can be resubmitted."
+        )
+
+    report.status = ReportStatus.PENDING_REVIEW
+    report.review_decision = None
+    report.reviewer_address = None
+    await db.commit()
+
+    return {"id": str(report.id), "status": report.status.value, "message": "Report resubmitted for review"}
 
 
 @router.post("/by-hash/{cid_hash}/evidence-key", status_code=200)

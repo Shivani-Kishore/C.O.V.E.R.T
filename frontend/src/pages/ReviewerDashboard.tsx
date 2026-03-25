@@ -924,18 +924,36 @@ export function ReviewerDashboard() {
                         'NEEDS_EVIDENCE': ReviewerDecision.NEEDS_EVIDENCE,
                         'REJECT_SPAM': ReviewerDecision.REJECT_SPAM,
                     };
+                    // Infer reviewDecision from DB status when review_decision field is absent
+                    const STATUS_TO_REVIEW_DECISION: Record<string, ReviewerDecision> = {
+                        'pending_review': ReviewerDecision.NONE,
+                        'pending': ReviewerDecision.NONE,
+                        'needs_evidence': ReviewerDecision.NEEDS_EVIDENCE,
+                        'rejected_by_reviewer': ReviewerDecision.REJECT_SPAM,
+                        'pending_moderation': ReviewerDecision.REVIEW_PASSED,
+                        'appealed': ReviewerDecision.REVIEW_PASSED,
+                        'verified': ReviewerDecision.REVIEW_PASSED,
+                        'rejected': ReviewerDecision.REVIEW_PASSED,
+                    };
+                    const STATUS_TO_FINAL_LABEL: Record<string, FinalLabel> = {
+                        'verified': FinalLabel.CORROBORATED,
+                        'rejected': FinalLabel.FALSE_OR_MANIPULATED,
+                        'disputed': FinalLabel.DISPUTED,
+                    };
                     const dbReports: ReviewableReport[] = (data.items || []).map(
-                        (r: { reporter?: string; visibility: string; cid_hash?: string; submitted_at?: string; review_decision?: string }, idx: number) => ({
+                        (r: { reporter?: string; visibility: string; cid_hash?: string; submitted_at?: string; review_decision?: string; status?: string }, idx: number) => ({
                             id: idx + 1,
                             reporter: r.reporter || '0x0000000000000000000000000000000000000000',
                             visibility: r.visibility === 'public' ? 'PUBLIC' : 'PRIVATE' as 'PUBLIC' | 'PRIVATE',
                             contentHash: r.cid_hash || '',
-                            finalLabel: FinalLabel.UNREVIEWED,
-                            reviewDecision: (r.review_decision && DB_REVIEW_DECISION[r.review_decision]) ?? ReviewerDecision.NONE,
+                            finalLabel: (r.status && STATUS_TO_FINAL_LABEL[r.status]) ?? FinalLabel.UNREVIEWED,
+                            reviewDecision: (r.review_decision && DB_REVIEW_DECISION[r.review_decision])
+                                ?? (r.status && STATUS_TO_REVIEW_DECISION[r.status])
+                                ?? ReviewerDecision.NONE,
                             createdAt: r.submitted_at ? new Date(r.submitted_at).getTime() / 1000 : Date.now() / 1000,
                             supportCount: 0,
                             challengeCount: 0,
-                            hasAppeal: false,
+                            hasAppeal: r.status === 'appealed',
                             stake: r.visibility === 'public' ? STAKES.REPORT_PUBLIC : STAKES.REPORT_PRIVATE,
                         })
                     );
@@ -997,6 +1015,15 @@ export function ReviewerDashboard() {
             }
 
             // Sync status + decision to backend DB so moderator/reporter dashboards update
+            // Map reviewer decision → new lifecycle status:
+            //   REVIEW_PASSED  → pending_moderation  (goes to moderator queue)
+            //   NEEDS_EVIDENCE → needs_evidence       (returned to reporter)
+            //   REJECT_SPAM    → rejected_by_reviewer (returned to reporter)
+            const DECISION_TO_STATUS: Record<number, string> = {
+                [ReviewerDecision.REVIEW_PASSED]:  'pending_moderation',
+                [ReviewerDecision.NEEDS_EVIDENCE]: 'needs_evidence',
+                [ReviewerDecision.REJECT_SPAM]:    'rejected_by_reviewer',
+            };
             const targetReport = reports.find(r => r.id === reportId);
             if (targetReport?.contentHash) {
                 fetch(`${API_BASE}/api/v1/reports/by-hash/${targetReport.contentHash}/status`, {
@@ -1006,7 +1033,7 @@ export function ReviewerDashboard() {
                         ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
                     },
                     body: JSON.stringify({
-                        status: 'under_review',
+                        status: DECISION_TO_STATUS[decision] ?? 'pending_moderation',
                         reviewer_address: walletAddress,
                         review_decision: ReviewerDecision[decision],
                     }),
@@ -1068,6 +1095,11 @@ export function ReviewerDashboard() {
                 useReviewDecisionStore.getState().recordDecision(String(id), ReviewerDecision[batchDecision] as 'REVIEW_PASSED' | 'NEEDS_EVIDENCE' | 'REJECT_SPAM');
                 setReports(prev => prev.map(r => r.id === id ? { ...r, reviewDecision: batchDecision } : r));
                 // Sync status + decision to backend
+                const DECISION_TO_STATUS_BATCH: Record<number, string> = {
+                    [ReviewerDecision.REVIEW_PASSED]:  'pending_moderation',
+                    [ReviewerDecision.NEEDS_EVIDENCE]: 'needs_evidence',
+                    [ReviewerDecision.REJECT_SPAM]:    'rejected_by_reviewer',
+                };
                 const target = reports.find(r => r.id === id);
                 if (target?.contentHash) {
                     fetch(`${API_BASE}/api/v1/reports/by-hash/${target.contentHash}/status`, {
@@ -1077,7 +1109,7 @@ export function ReviewerDashboard() {
                             ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
                         },
                         body: JSON.stringify({
-                            status: 'under_review',
+                            status: DECISION_TO_STATUS_BATCH[batchDecision] ?? 'pending_moderation',
                             reviewer_address: walletAddress,
                             review_decision: ReviewerDecision[batchDecision],
                         }),

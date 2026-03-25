@@ -11,7 +11,7 @@ class ReportCreate(BaseModel):
     """Schema for creating a new report"""
     cid: str = Field(..., min_length=46, max_length=100, description="IPFS CID")
     cid_hash: str = Field(..., min_length=64, max_length=66, description="SHA256 hash of CID")
-    tx_hash: str = Field(..., min_length=66, max_length=66, description="Blockchain transaction hash")
+    tx_hash: Optional[str] = Field(None, min_length=66, max_length=66, description="Blockchain transaction hash (set after on-chain commit)")
     category: str = Field(..., description="Report category")
     visibility: int = Field(..., ge=0, le=2, description="0=private, 1=moderated, 2=public")
     size_bytes: int = Field(..., gt=0, description="Size of encrypted data")
@@ -29,8 +29,8 @@ class ReportCreate(BaseModel):
 
     @field_validator("tx_hash")
     @classmethod
-    def validate_tx_hash(cls, v: str) -> str:
-        if not v.startswith("0x"):
+    def validate_tx_hash(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.startswith("0x"):
             raise ValueError("Transaction hash must start with 0x")
         return v
 
@@ -46,7 +46,7 @@ class ReportResponse(BaseModel):
     id: str
     cid: str
     cid_hash: Optional[str] = None
-    tx_hash: str
+    tx_hash: Optional[str] = None
     category: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
@@ -68,7 +68,7 @@ class ReportListItem(BaseModel):
     id: str
     cid: str
     cid_hash: Optional[str] = None
-    tx_hash: str
+    tx_hash: Optional[str] = None
     category: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None

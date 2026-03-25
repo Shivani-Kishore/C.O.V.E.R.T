@@ -23,18 +23,35 @@ interface ReportCardProps {
   compact?: boolean;
   onDelete?: (id: string) => void;
   onAppeal?: (report: Report) => void;
+  onResubmit?: (report: Report) => void;
 }
 
 const statusConfig: Record<ReportStatus, { label: string; color: string; icon: React.ElementType }> = {
-  pending: {
-    label: 'Pending',
+  // New lifecycle statuses
+  pending_review: {
+    label: 'Pending Review',
     color: 'bg-yellow-900/40 text-yellow-400',
     icon: ClockIcon,
   },
-  under_review: {
-    label: 'Under Review',
+  needs_evidence: {
+    label: 'Needs Evidence',
+    color: 'bg-amber-900/40 text-amber-400',
+    icon: ExclamationTriangleIcon,
+  },
+  rejected_by_reviewer: {
+    label: 'Rejected by Reviewer',
+    color: 'bg-red-900/30 text-red-400',
+    icon: XCircleIcon,
+  },
+  pending_moderation: {
+    label: 'Under Moderation',
     color: 'bg-blue-900/40 text-blue-400',
     icon: EyeIcon,
+  },
+  appealed: {
+    label: 'Appealed',
+    color: 'bg-purple-900/40 text-purple-400',
+    icon: ExclamationTriangleIcon,
   },
   verified: {
     label: 'Verified',
@@ -45,6 +62,22 @@ const statusConfig: Record<ReportStatus, { label: string; color: string; icon: R
     label: 'Rejected',
     color: 'bg-red-900/40 text-red-400',
     icon: XCircleIcon,
+  },
+  archived: {
+    label: 'Archived',
+    color: 'bg-neutral-800 text-neutral-500',
+    icon: ClockIcon,
+  },
+  // Legacy statuses
+  pending: {
+    label: 'Pending',
+    color: 'bg-yellow-900/40 text-yellow-400',
+    icon: ClockIcon,
+  },
+  under_review: {
+    label: 'Under Review',
+    color: 'bg-blue-900/40 text-blue-400',
+    icon: EyeIcon,
   },
   disputed: {
     label: 'Disputed',
@@ -94,6 +127,7 @@ export const ReportCard = memo(function ReportCard({
   compact = false,
   onDelete,
   onAppeal,
+  onResubmit,
 }: ReportCardProps) {
   const navigate = useNavigate();
 
@@ -220,6 +254,14 @@ export const ReportCard = memo(function ReportCard({
         </div>
 
         <div className="flex items-center gap-2">
+          {onResubmit && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onResubmit(report); }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-800 text-neutral-300 border border-neutral-700 hover:border-neutral-500 hover:text-white transition-all"
+            >
+              Resubmit
+            </button>
+          )}
           {onAppeal && (
             <button
               onClick={(e) => { e.stopPropagation(); onAppeal(report); }}

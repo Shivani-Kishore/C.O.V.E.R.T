@@ -28,11 +28,16 @@ import { API_BASE } from '@/config';
 
 const STATUS_OPTIONS: { value: ReportStatus | ''; label: string }[] = [
   { value: '', label: 'All Status' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'under_review', label: 'Under Review' },
+  { value: 'pending_review', label: 'Pending Review' },
+  { value: 'needs_evidence', label: 'Needs Evidence' },
+  { value: 'rejected_by_reviewer', label: 'Rejected by Reviewer' },
+  { value: 'pending_moderation', label: 'Under Moderation' },
+  { value: 'appealed', label: 'Appealed' },
   { value: 'verified', label: 'Verified' },
   { value: 'rejected', label: 'Rejected' },
-  { value: 'disputed', label: 'Disputed' },
+  { value: 'pending', label: 'Pending (legacy)' },
+  { value: 'under_review', label: 'Under Review (legacy)' },
+  { value: 'disputed', label: 'Disputed (legacy)' },
 ];
 
 const CATEGORY_OPTIONS: { value: ReportCategory | ''; label: string }[] = [
@@ -61,28 +66,30 @@ function applyStakeReturns(freshReports: Report[], walletAddress: string) {
   for (const report of freshReports) {
     const stakeAmount = STAKE_AMOUNTS[report.visibility as VisibilityKey] ?? 0;
 
-    // ── 25% partial return when status moves to under_review (reviewer passed) ──
-    // Note: isMajorityPassed() only works in the reviewer's browser (they record
-    // their own votes locally). For the reporter's wallet we rely solely on the
-    // backend status being 'under_review', which is set when a reviewer passes.
+    // ── 25% partial return when reviewer passes the report to moderation ──
+    // Triggered when status moves to 'pending_moderation' (or legacy 'under_review').
+    const reviewerPassedStatuses: ReportStatus[] = ['pending_moderation', 'under_review'];
     if (
-      report.status === 'under_review' &&
+      reviewerPassedStatuses.includes(report.status) &&
       !decStore.isPartialReturnApplied(report.id, addr)
     ) {
       const partialReturn = Math.floor(stakeAmount * PARTIAL_RETURN_RATE);
       covStore.addBalance(addr, partialReturn);
       decStore.markPartialReturnApplied(report.id, addr);
-      toast.success(`${partialReturn} COV returned — review majority passed!`, {
+      toast.success(`${partialReturn} COV returned — reviewer passed!`, {
         id: `pr-${report.id}`,
       });
     }
 
     // ── 75% final settlement when moderator has finalized the report ──
+    // Only triggered after moderator's final decision (verified or rejected).
+    // 'disputed' is kept for legacy backward compat.
+    const finalizedStatuses: ReportStatus[] = ['verified', 'rejected', 'disputed'];
     if (
-      (report.status === 'verified' || report.status === 'rejected' || report.status === 'disputed') &&
+      finalizedStatuses.includes(report.status) &&
       !decStore.isFinalSettlementApplied(report.id, addr)
     ) {
-      // rejected = FALSE_OR_MANIPULATED → stake burned → 0 returned
+      // rejected = FALSE_OR_MANIPULATED → stake slashed → 0 returned
       // verified / disputed → remaining 75% returned to reporter
       const finalReturn =
         report.status === 'rejected'
@@ -371,11 +378,41 @@ export function MySubmissions() {
     }
   }, [fetchReports]);
 
+  const handleResubmit = useCallback(async (report: Report) => {
+    const confirmed = window.confirm(
+      'Resubmit this report for review? The reviewer\'s decision will be cleared and it will re-enter the review queue.'
+    );
+    if (!confirmed) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      const walletAddress = walletState.address || localStorage.getItem('wallet_address') || '';
+      const res = await fetch(
+        `${API_BASE}/api/v1/reports/by-hash/${report.commitmentHash}/resubmit`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
+          },
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Server returned ${res.status}`);
+      }
+      toast.success('Report resubmitted for review');
+      fetchReports();
+    } catch (err) {
+      toast.error(`Resubmit failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  }, [walletState.address, fetchReports]);
+
   const filteredReports = getFilteredReports();
 
   const stats = {
     total: reports.length,
-    pending: reports.filter((r) => r.status === 'pending').length,
+    pending: reports.filter((r) => r.status === 'pending_review' || r.status === 'pending').length,
     verified: reports.filter((r) => r.status === 'verified').length,
     rejected: reports.filter((r) => r.status === 'rejected').length,
   };
@@ -603,12 +640,19 @@ export function MySubmissions() {
               key={report.id}
               report={report}
               onDelete={handleDeleteOne}
+              onResubmit={
+                (report.status === 'needs_evidence' || report.status === 'rejected_by_reviewer') &&
+                !report.hasAppeal
+                  ? handleResubmit
+                  : undefined
+              }
               onAppeal={
                 report.onChainId !== undefined &&
                 report.reviewDecision !== undefined &&
                 report.reviewDecision !== 0 &&
                 !report.hasAppeal &&
-                (report.status === 'rejected' || report.status === 'disputed')
+                (report.status === 'needs_evidence' || report.status === 'rejected_by_reviewer' ||
+                 report.status === 'rejected' || report.status === 'disputed')
                   ? handleAppeal
                   : undefined
               }
