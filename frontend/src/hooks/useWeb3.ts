@@ -21,7 +21,7 @@
  *   • MetaMask fires accountsChanged with an empty list.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { web3Service, WalletType, TransactionResult, Commitment } from '../services/web3';
 import { useWalletSessionStore } from '../stores/walletSessionStore';
 import { protocolService } from '../services/protocol';
@@ -103,13 +103,18 @@ export function useWeb3(): UseWeb3Return {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Derive WalletState from the shared store so every component sees the same value
-  const walletState: WalletState = {
-    connected: session.connected && session.isSessionValid(),
-    address: session.isSessionValid() ? session.address : null,
-    chainId: session.isSessionValid() ? session.chainId : null,
-    balance: session.isSessionValid() ? session.balance : null,
-  };
+  // Derive WalletState from the shared store.
+  // Memoized so the object reference only changes when actual values change —
+  // prevents downstream effects from re-firing on unrelated store updates
+  // (e.g. expiresAt bumping on every silent session restore).
+  const sessionValid = session.isSessionValid();
+  const walletState: WalletState = useMemo(() => ({
+    connected: session.connected && sessionValid,
+    address: sessionValid ? session.address : null,
+    chainId: sessionValid ? session.chainId : null,
+    balance: sessionValid ? session.balance : null,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [session.connected, sessionValid, session.address, session.chainId, session.balance]);
 
   // ── Configure contracts once on mount ─────────────────────────────────────
   useEffect(() => {

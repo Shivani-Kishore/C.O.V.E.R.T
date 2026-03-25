@@ -222,28 +222,16 @@ export function ReportSubmissionForm() {
         throw new Error('IPFS upload failed: No CID returned');
       }
 
-      // Step 3: Commit to blockchain
+      // Step 3: Submit to backend FIRST (without tx_hash)
+      // This ensures COV tokens are NEVER locked unless the backend already accepted the report.
       setSubmissionProgress({
-        step: 'committing',
-        progress: 70,
-        message: 'Committing to blockchain...',
+        step: 'submitting',
+        progress: 60,
+        message: 'Registering report...',
       });
 
       const cidHash = ethers.keccak256(ethers.toUtf8Bytes(ipfsResult.cid));
       const visibilityInt = draft.visibility === 'private' ? 0 : draft.visibility === 'moderated' ? 1 : 2;
-
-      const txResult = await commitReport(ipfsResult.cid, visibilityInt);
-
-      if (!txResult.success || !txResult.transactionHash) {
-        throw new Error(txResult.error || 'Blockchain commitment failed');
-      }
-
-      // Step 4: Submit to backend
-      setSubmissionProgress({
-        step: 'submitting',
-        progress: 90,
-        message: 'Finalizing submission...',
-      });
 
       const response = await fetch(`${API_BASE}/api/v1/reports`, {
         method: 'POST',
@@ -255,7 +243,6 @@ export function ReportSubmissionForm() {
         body: JSON.stringify({
           cid: ipfsResult.cid,
           cid_hash: cidHash,
-          tx_hash: txResult.transactionHash,
           category: draft.category,
           visibility: visibilityInt,
           size_bytes: ipfsResult.size,
@@ -278,6 +265,60 @@ export function ReportSubmissionForm() {
 
       const result = await response.json();
 
+      // Step 4: Commit to blockchain (locks COV) — only AFTER backend accepted
+      setSubmissionProgress({
+        step: 'committing',
+        progress: 75,
+        message: 'Committing to blockchain...',
+      });
+
+      let txResult;
+      try {
+        txResult = await commitReport(ipfsResult.cid, visibilityInt);
+      } catch (blockchainErr) {
+        // Backend already saved the report — no COV was locked.
+        console.warn('[Submit] Blockchain commit failed after backend save:', blockchainErr);
+        // Still count as partial success — report is saved
+        addReport({
+          id: result.id,
+          commitmentHash: cidHash,
+          ipfsCid: ipfsResult.cid,
+          transactionHash: '',
+          category: draft.category as ReportCategory,
+          title: draft.title,
+          status: 'pending',
+          visibility: draft.visibility,
+          fileSize: ipfsResult.size,
+          submittedAt: new Date().toISOString(),
+        });
+        throw new Error(
+          'Report saved but blockchain commit failed. No COV was locked. ' +
+          'You can retry the blockchain commit from My Reports.'
+        );
+      }
+
+      // Step 5: Update backend with the transaction hash
+      if (txResult.success && txResult.transactionHash) {
+        try {
+          await fetch(`${API_BASE}/api/v1/reports/${result.id}/commit`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('token')}`,
+              ...(walletState.address ? { 'X-Wallet-Address': walletState.address } : {}),
+            },
+            body: JSON.stringify({
+              tx_hash: txResult.transactionHash,
+              block_number: txResult.blockNumber || null,
+            }),
+          });
+        } catch {
+          // Non-critical — report and on-chain commit both succeeded
+          console.warn('[Submit] Failed to update backend with tx_hash');
+        }
+      }
+
+      // Store encryption key locally
       try {
         if (walletState.address) {
           const walletSignature = await web3Service.signMessage(
@@ -310,7 +351,7 @@ export function ReportSubmissionForm() {
             body: JSON.stringify({ key_hex: keyHex }),
           });
         } catch {
-          // Non-critical — report already submitted; evidence just won't be decryptable by reviewers
+          // Non-critical — evidence just won't be decryptable by reviewers
         }
       }
 
@@ -318,7 +359,7 @@ export function ReportSubmissionForm() {
         id: result.id,
         commitmentHash: cidHash,
         ipfsCid: ipfsResult.cid,
-        transactionHash: txResult.transactionHash || '',
+        transactionHash: txResult?.transactionHash || '',
         category: draft.category as ReportCategory,
         title: draft.title,
         status: 'pending',
@@ -327,8 +368,8 @@ export function ReportSubmissionForm() {
         submittedAt: new Date().toISOString(),
       });
 
-      // Deduct the stake from the COV balance immediately
-      if (walletState.address) {
+      // Deduct the stake from the COV balance display
+      if (walletState.address && txResult?.success) {
         const staked = deductStake(walletState.address, draft.visibility as VisibilityKey);
         toast.success(`${staked} COV staked on your report`, { id: 'cov-stake', duration: 3000 });
       }

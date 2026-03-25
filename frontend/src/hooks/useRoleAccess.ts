@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useWeb3 } from './useWeb3';
 import { protocolService } from '@/services/protocol';
@@ -42,16 +42,23 @@ async function fetchReputation(address: string): Promise<{ reputation_score: num
 export function useRoleAccess() {
   const { walletState } = useWeb3();
   const [state, setState] = useState<RoleAccessState>(INITIAL);
-  // Live COV balance from the persistent store (updates immediately on stake/reward)
+  // Track whether the initial load has completed — background refreshes must NOT
+  // set loading:true (that causes the dashboard to unmount and "reload" visually).
+  const initialLoadDone = useRef(false);
+
+  // Stable address ref so the COV balance selector doesn't recreate on every render
+  const addressRef = useRef(walletState.address);
+  addressRef.current = walletState.address;
   const covBalanceLive = useCovBalanceStore(
-    (s) => walletState.address ? s.getBalance(walletState.address) : 0
+    (s) => addressRef.current ? s.getBalance(addressRef.current) : 0
   );
 
   useEffect(() => {
     let cancelled = false;
 
-    const loadRoles = async () => {
+    const loadRoles = async (isBackground = false) => {
       if (!walletState.connected || !walletState.address) {
+        initialLoadDone.current = false;
         setState({ ...INITIAL, loading: false });
         return;
       }
@@ -62,7 +69,11 @@ export function useRoleAccess() {
         covertProtocolAddress: import.meta.env.VITE_COVERT_PROTOCOL_ADDRESS || '',
       });
 
-      setState((prev) => ({ ...prev, loading: true }));
+      // Only show the loading spinner on the very first load.
+      // Background polls (interval / rep-refresh events) update silently.
+      if (!isBackground) {
+        setState((prev) => ({ ...prev, loading: true }));
+      }
 
       try {
         if (import.meta.env.VITE_DEV_MODE === 'true') {
@@ -85,6 +96,7 @@ export function useRoleAccess() {
           }
 
           if (!cancelled) {
+            initialLoadDone.current = true;
             setState({
               loading: false,
               isReviewer: role === 'reviewer',
@@ -132,6 +144,7 @@ export function useRoleAccess() {
         );
 
         if (!cancelled) {
+          initialLoadDone.current = true;
           setState({
             loading: false,
             isReviewer,
@@ -147,6 +160,7 @@ export function useRoleAccess() {
         if (import.meta.env.VITE_DEV_MODE === 'true') {
           const role = getAddressRole(walletState.address);
           if (!cancelled) {
+            initialLoadDone.current = true;
             setState({
               loading: false,
               isReviewer: role === 'reviewer',
@@ -160,20 +174,23 @@ export function useRoleAccess() {
           }
           return;
         }
-        if (!cancelled) setState(INITIAL);
+        if (!cancelled) {
+          initialLoadDone.current = true;
+          setState(INITIAL);
+        }
       }
     };
 
-    loadRoles();
+    // Initial load (shows spinner)
+    loadRoles(false);
 
-    // Re-run loadRoles when MySubmissions detects a newly finalized report
-    // (dispatched after moderation settlement so ProfileButton shows updated rep)
-    const onRepRefresh = () => { loadRoles(); };
+    // Re-run silently when a finalized report triggers a rep refresh
+    const onRepRefresh = () => { loadRoles(true); };
     window.addEventListener('covert:rep-refresh', onRepRefresh);
 
-    // Poll every 60s so cross-browser rep/balance changes are picked up
+    // Poll every 60s silently — no loading spinner
     const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') loadRoles();
+      if (document.visibilityState === 'visible') loadRoles(true);
     }, 60_000);
 
     return () => {

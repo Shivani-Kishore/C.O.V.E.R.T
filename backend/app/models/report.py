@@ -178,6 +178,7 @@ class Report(Base):
     # Reviewer tracking — wallet address and decision of the reviewer who assessed this report
     reviewer_address = Column(String(42))
     review_decision = Column(String(20))  # 'REVIEW_PASSED' | 'NEEDS_EVIDENCE' | 'REJECT_SPAM' | None
+    final_label = Column(String(30))  # 'CORROBORATED' | 'NEEDS_EVIDENCE' | 'DISPUTED' | 'FALSE_OR_MANIPULATED' | None
 
     # Scheduled Submission (delayed publishing for reporter safety)
     scheduled_for = Column(DateTime(timezone=True))

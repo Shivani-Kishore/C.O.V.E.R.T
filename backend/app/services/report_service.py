@@ -4,7 +4,7 @@ Business logic for report management
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from typing import Optional, List, Tuple
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -207,7 +207,13 @@ class ReportService:
         try:
             query = select(Report).where(
                 and_(
-                    Report.visibility == ReportVisibility.PUBLIC,
+                    or_(
+                        Report.visibility == ReportVisibility.PUBLIC,
+                        and_(
+                            Report.visibility == ReportVisibility.MODERATED,
+                            Report.status.in_([ReportStatus.VERIFIED, ReportStatus.REJECTED]),
+                        ),
+                    ),
                     Report.deleted_at.is_(None),
                 )
             )

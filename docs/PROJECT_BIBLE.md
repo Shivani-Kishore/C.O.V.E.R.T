@@ -87,7 +87,7 @@ C.O.V.E.R.T enables anonymous whistleblowers to submit encrypted evidence report
 ```
 
 ### Data Flow
-1. **Report Submission:** Frontend encrypts (AES-256-GCM) → uploads to IPFS → commits hash on-chain → saves metadata in backend DB → stores evidence key
+1. **Report Submission:** Frontend encrypts (AES-256-GCM) → uploads to IPFS → saves metadata in backend DB (without tx_hash) → commits hash on-chain (locks COV stake) → updates backend with tx_hash → stores evidence key. **Backend-first order prevents COV tokens being locked when the backend rejects the report.**
 2. **Review:** Reviewer fetches reports from chain (or DB fallback) → decrypts evidence using stored key → sets on-chain review decision → syncs to DB
 3. **Moderation:** Moderator fetches reviewed reports → flags malicious actors → finalizes on-chain (settles stakes) → backend applies reputation deltas
 4. **Cross-Dashboard Updates:** `CustomEvent` dispatch + 30-60s polling for cross-tab/cross-user synchronisation
@@ -116,10 +116,10 @@ C.O.V.E.R.T enables anonymous whistleblowers to submit encrypted evidence report
 | Python | 3.10+ | Runtime |
 | FastAPI | 0.109.0 | Async API framework |
 | SQLAlchemy | 2.0.25 | Async ORM |
-| asyncpg | 0.29.0 | PostgreSQL async driver |
+| asyncpg | 0.30.0 | PostgreSQL async driver |
 | Alembic | 1.13.1 | Database migrations |
-| Web3.py | 6.15.0 | Blockchain interaction |
-| Pydantic | 2.5.3 | Request/response validation |
+| Web3.py | >=6.17.0 | Blockchain interaction |
+| Pydantic | 2.9.2 | Request/response validation |
 | Redis | 5.0.1 | Caching |
 | Celery | 5.3.4 | Task queue |
 | Uvicorn | 0.27.0 | ASGI server |
@@ -386,8 +386,8 @@ All must be met simultaneously:
 │             │     │              │     │              │     │              │
 │ • Encrypt   │     │ • Reviewer   │     │ • Moderator  │     │ • Stakes     │
 │ • IPFS      │     │   decision   │     │   final label│     │   settled    │
-│ • On-chain  │     │ • Support/   │     │ • Appeal     │     │ • Rep deltas │
-│ • DB save   │     │   Challenge  │     │   outcome    │     │   applied    │
+│ • DB save   │     │ • Support/   │     │ • Appeal     │     │ • Rep deltas │
+│ • On-chain  │     │   Challenge  │     │   outcome    │     │   applied    │
 │ • Key store │     │              │     │ • Malicious  │     │              │
 └─────────────┘     └──────┬───────┘     │   flags      │     └──────────────┘
                            │             └──────────────┘
@@ -998,8 +998,10 @@ export const IPFS_GATEWAY = import.meta.env.VITE_IPFS_GATEWAY || 'https://nftsto
 **No `localhost` fallbacks in frontend code.** If `VITE_API_URL` is unset, `API_BASE` defaults to `''` (same-origin), ensuring production deployments never accidentally hit localhost.
 
 ### Backend Config (`backend/app/core/config.py`)
-- CORS origins: `http://localhost:5173`, `http://localhost:3000`
-- JWT: HS256, 7-day expiry
+- CORS origins: `http://localhost:5173`, `http://localhost:3000`, `https://covert-chi.vercel.app`
+- CORS validator always appends `https://covert-chi.vercel.app` even if overridden by env var
+- Global exception handler in `main.py` ensures CORS headers appear on 500 errors
+- JWT: HS256, 7-day expiry (SIWE-based authentication)
 - DB pool: size=20, max_overflow=40, pre_ping=true
 - GZip compression for responses > 1000 bytes
 - `@validator("SECRET_KEY")` — raises `ValueError` if default key is used when `ENVIRONMENT=production`
@@ -1024,10 +1026,31 @@ forge script script/Deploy.s.sol --rpc-url localhost --broadcast
 forge script script/GrantRoles.s.sol --rpc-url localhost --broadcast
 ```
 
-**Testnet (Base Sepolia):**
+**Testnet (Base Sepolia) — CURRENTLY DEPLOYED:**
 ```bash
-forge script script/Deploy.s.sol --rpc-url $BASE_SEPOLIA_RPC_URL --broadcast --verify
+cd contracts
+forge script script/Deploy.s.sol --tc DeployScript --rpc-url https://sepolia.base.org --broadcast
+forge script script/GrantRolesTestnet.s.sol --rpc-url https://sepolia.base.org --broadcast
 ```
+
+Deployed addresses saved in `contracts/deployments/base-sepolia.json`:
+```
+CommitmentRegistry: 0x5147e66507b0797E1E39FC7C052e465176D9bF1E
+DailyAnchor:        0x5D55b7C08e45F467eE1F3F212663cE6eb9ef6428
+COVCredits:         0x6ea581d247A8A43BC8544b788f9e100895099903
+CovertBadges:       0x81ec2Fe3467535fd8e3A8a5bc00Bc226f2fedda4
+CovertProtocol:     0x5B7AB21B2656BD187c3B544937eac9f36d901CbA
+```
+
+`GrantRolesTestnet.s.sol` grants both AccessControl roles on CovertProtocol AND mints SBT badges on CovertBadges for 2 reviewers and 2 moderators.
+
+Testnet wallet addresses configured in `contracts/.env`:
+| Env Var | Address | Role |
+|---------|---------|------|
+| REVIEWER_ADDRESS_1 | `0xc1a6EDea015AdcE9f56E84DA1C81E11b654E8cf1` | Reviewer |
+| REVIEWER_ADDRESS_2 | `0x52e0ec9dcfF2FF7082927414cEe58F4Aac976C03` | Reviewer |
+| MODERATOR_ADDRESS_1 | `0xa429C534cF66A83bFbFFF1163ce4e7c4f907f136` | Moderator |
+| MODERATOR_ADDRESS_2 | `0xE06C3F820586b4e31C001565b4eB9D18fBB0C0C7` | Moderator |
 
 **Mainnet (Base):**
 ```bash
@@ -1036,14 +1059,21 @@ forge script script/Deploy.s.sol --rpc-url $BASE_RPC_URL --broadcast --verify
 
 After deployment, update `.env` with contract addresses from `deployments/{network}.json`.
 
-### Backend
+### Backend — CURRENTLY DEPLOYED ON RAILWAY
 
+**Local:**
 ```bash
 cd backend
 pip install -r requirements.txt
 alembic upgrade head           # Run all migrations
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+**Railway deployment:**
+- `Procfile` runs `release: alembic upgrade head` before starting the web process
+- `runtime.txt` specifies `python-3.12.7`
+- DATABASE_URL configured as Railway env var
+- CORS always includes `https://covert-chi.vercel.app`
 
 **Production considerations:**
 - Set `ENVIRONMENT=production`, `DEBUG=false`
@@ -1060,7 +1090,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 **Chain ID:** `report_service.py` reads `chain_id` from `settings.CHAIN_ID` (not hardcoded to 31337), so the backend works on any target chain without code changes.
 
-### Frontend
+### Frontend — CURRENTLY DEPLOYED ON VERCEL
+
+**Production URL:** `https://covert-chi.vercel.app`
 
 ```bash
 cd frontend
@@ -1069,19 +1101,25 @@ npm run build                  # Production build
 # Serve dist/ folder
 ```
 
+**Vercel deployment:**
+- Auto-deploys from `main` branch
+- All `VITE_*` env vars must be set in Vercel dashboard (baked at build time)
+- Requires redeploy after changing env vars
+
 **Production considerations:**
 - Set `VITE_DEV_MODE=false`
 - Update all `VITE_*` contract addresses for target network
-- Update `VITE_API_URL` for production backend
-- Update `VITE_RPC_URL` for production RPC (e.g., Alchemy, Infura)
-- Update `VITE_CHAIN_ID` (e.g., 8453 for Base mainnet)
+- Update `VITE_API_URL` for production backend (Railway URL)
+- Update `VITE_RPC_URL` for production RPC (currently `https://sepolia.base.org`)
+- Update `VITE_CHAIN_ID` (currently `84532` for Base Sepolia)
+- Set `VITE_PINATA_API_KEY` and `VITE_PINATA_API_SECRET` for IPFS uploads
 
-### Production Auth Gaps (Must implement before mainnet)
-- Backend currently uses `X-Wallet-Address` header (not verified)
-- No wallet signature verification on sensitive endpoints
-- Role-based access control is frontend-only
-- Evidence key endpoint has no auth beyond reporter check
-- Must implement EIP-4361 (Sign-In with Ethereum) or equivalent
+### Authentication & Access Control (Status)
+- [x] **SIWE (EIP-4361) authentication implemented** — frontend signs message, backend verifies and issues JWT
+- [x] **Backend RBAC implemented** — `rbac.py` verifies on-chain roles for reviewer/moderator endpoints
+- [x] **JWT-based auth** — `get_current_wallet` dependency extracts wallet from JWT
+- [ ] Evidence key endpoint currently checks reporter ownership but not JWT auth
+- [ ] Some endpoints still accept `X-Wallet-Address` header as fallback
 
 ---
 
@@ -1142,7 +1180,7 @@ This burns all COV balances and mints 30 COV to each of the 10 test accounts, th
 
 ### Fully Implemented
 - Client-side AES-256-GCM encryption with padding
-- IPFS upload (local, NFT.Storage, web3.storage, dev-mode IndexedDB)
+- IPFS upload (local, NFT.Storage, web3.storage, Pinata, dev-mode IndexedDB)
 - On-chain commitment tracking (CommitmentRegistry)
 - COV token system (mint, burn, welcome grant, non-transferable)
 - Soul-bound badge NFTs (CovertBadges)
@@ -1165,6 +1203,13 @@ This burns all COV balances and mints 30 COV to each of the 10 test accounts, th
 - DMS data models and API endpoints
 - AI analysis endpoints (rule-based)
 - Daily Merkle anchoring (DailyAnchor contract)
+- **SIWE (Sign-In with Ethereum) authentication** — JWT-based, wallet signature verified
+- **Backend RBAC** — on-chain role verification for reviewer/moderator endpoints (`rbac.py`)
+- **Safe submission flow** — backend-first, blockchain-second (prevents COV lock on failed submissions)
+- **Base Sepolia deployment** — all 5 contracts deployed with role grants + badge minting
+- **Vercel frontend deployment** with CORS auto-configured
+- **Railway backend deployment** with Procfile and release-phase Alembic migrations
+- **Department routing** for corroborated reports
 
 ### Partially Implemented / In Progress
 - **DMS Watchdog:** Background worker models and service stubs exist, but no actual background task runner (Celery worker not configured)
@@ -1173,11 +1218,7 @@ This burns all COV balances and mints 30 COV to each of the 10 test accounts, th
 - **Reviewer Role Automation:** Backend endpoint exists (`POST /sync-reviewer-roles`), blockchain service has methods, but no scheduled execution
 
 ### Not Yet Implemented
-- **Backend authentication:** No wallet signature verification (EIP-4361 / SIWE). Currently trusts `X-Wallet-Address` header.
-- **Backend RBAC:** Role checks are frontend-only. Backend endpoints are open.
 - **WebSocket real-time updates:** Currently using polling (30-60s intervals)
-- **Production IPFS pinning service:** Pinata/web3.storage API tokens not configured
-- **Production RPC provider:** Using localhost:8545, need Alchemy/Infura for mainnet
 - **Rate limiting enforcement:** Configuration exists but not wired to Redis
 - **Notification system:** DMS contact notifications are stub implementations
 - **Governance / voting:** No on-chain governance mechanism
@@ -1191,8 +1232,8 @@ This burns all COV balances and mints 30 COV to each of the 10 test accounts, th
 ## 19. Production Readiness Checklist
 
 ### Security (Critical)
-- [ ] Implement wallet signature verification (EIP-4361 / Sign-In with Ethereum)
-- [ ] Add backend RBAC middleware (verify on-chain roles for protected endpoints)
+- [x] Implement wallet signature verification (EIP-4361 / Sign-In with Ethereum) — `useWeb3.ts` + `auth.py`
+- [x] Add backend RBAC middleware (verify on-chain roles for protected endpoints) — `rbac.py`
 - [ ] Audit evidence-key endpoint (currently no auth beyond reporter ownership)
 - [ ] Audit all PATCH/POST/DELETE endpoints for proper auth
 - [ ] Rate limiting via Redis (currently config-only)
@@ -1218,7 +1259,7 @@ This burns all COV balances and mints 30 COV to each of the 10 test accounts, th
 - [ ] Redis for rate limiting + caching
 - [ ] HTTPS everywhere (TLS certificates)
 - [ ] Reverse proxy (nginx/Caddy) with security headers
-- [ ] CORS restricted to production domains only
+- [x] CORS restricted to production domains — Vercel origin always included via validator
 - [ ] Environment variable management (Vault, AWS SSM, etc.)
 - [ ] Container orchestration (Docker Compose / Kubernetes)
 - [ ] CI/CD pipeline (build, test, deploy)
@@ -1260,4 +1301,4 @@ This burns all COV balances and mints 30 COV to each of the 10 test accounts, th
 
 ---
 
-*Last updated: 2026-03-21. Production readiness audit applied — centralised config, error handling, security fixes, database resilience, contract improvements.*
+*Last updated: 2026-03-25. Major updates: SIWE authentication, backend RBAC, safe submission flow (backend-first), Base Sepolia deployment with role grants + badge minting, Railway/Vercel deployment, CORS fixes, tx_hash made optional, chain_id constraint updated.*

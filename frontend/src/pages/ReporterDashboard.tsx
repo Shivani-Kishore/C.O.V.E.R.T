@@ -50,15 +50,32 @@ function PublicReportCard({ report, isConnected }: { report: Report; isConnected
   };
 
   const statusColor: Record<string, string> = {
+    // v2 lifecycle statuses
+    pending_review: 'text-yellow-400',
+    needs_evidence: 'text-amber-400',
+    rejected_by_reviewer: 'text-red-400',
+    pending_moderation: 'text-blue-400',
+    appealed: 'text-purple-400',
+    verified: 'text-green-400',
+    rejected: 'text-red-400',
+    archived: 'text-neutral-500',
+    // Legacy statuses
     pending: 'text-neutral-400',
     under_review: 'text-neutral-300',
-    verified: 'text-white',
-    rejected: 'text-neutral-500',
     disputed: 'text-neutral-400',
   };
 
-  // Evidence visibility rules
-  const isDecided = report.status === 'verified' || report.status === 'rejected';
+  const decisionLabelConfig: Record<string, { label: string; color: string }> = {
+    CORROBORATED: { label: 'Corroborated', color: 'text-green-400 bg-green-900/30' },
+    DISPUTED: { label: 'Disputed', color: 'text-orange-400 bg-orange-900/30' },
+    NEEDS_EVIDENCE: { label: 'Needs Evidence', color: 'text-amber-400 bg-amber-900/30' },
+    FALSE_OR_MANIPULATED: { label: 'False / Manipulated', color: 'text-red-400 bg-red-900/30' },
+    REVIEW_PASSED: { label: 'Review Passed', color: 'text-blue-400 bg-blue-900/30' },
+    REJECT_SPAM: { label: 'Rejected (Spam)', color: 'text-red-400 bg-red-900/30' },
+  };
+
+  // Evidence visibility rules — show evidence once a decision has been reached
+  const isDecided = ['verified', 'rejected', 'pending_moderation', 'needs_evidence', 'rejected_by_reviewer'].includes(report.status);
   const showEvidence = report.visibility === 'public' || isDecided;
   const hasEvidence = !!(report.commitmentHash && report.ipfsCid);
 
@@ -159,6 +176,17 @@ function PublicReportCard({ report, isConnected }: { report: Report; isConnected
                 </span>
               </>
             )}
+            {/* Decision label badge */}
+            {(report.finalLabel || report.reviewDecisionLabel) && (() => {
+              const key = report.finalLabel || report.reviewDecisionLabel || '';
+              const cfg = decisionLabelConfig[key];
+              if (!cfg) return null;
+              return (
+                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${cfg.color}`}>
+                  {cfg.label}
+                </span>
+              );
+            })()}
             <span className={`text-xs font-medium capitalize ${statusColor[report.status] ?? 'text-neutral-400'}`}>
               {report.status.replace(/_/g, ' ')}
             </span>

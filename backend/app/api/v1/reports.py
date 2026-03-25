@@ -184,6 +184,8 @@ async def list_reports(
             risk_level=r.risk_level.value if r.risk_level and hasattr(r.risk_level, 'value') else r.risk_level,
             submitted_at=r.submission_timestamp,
             reviewed_at=None,
+            review_decision=r.review_decision,
+            final_label=getattr(r, 'final_label', None),
         )
         for r in reports
     ]
@@ -232,6 +234,8 @@ async def list_public_reports(
             risk_level=r.risk_level.value if r.risk_level and hasattr(r.risk_level, 'value') else r.risk_level,
             submitted_at=r.submission_timestamp,
             reviewed_at=None,
+            review_decision=r.review_decision,
+            final_label=getattr(r, 'final_label', None),
         )
         for r in reports
     ]
@@ -279,6 +283,7 @@ async def list_all_reports(
             submitted_at=r.submission_timestamp,
             reviewed_at=None,
             review_decision=r.review_decision,
+            final_label=getattr(r, 'final_label', None),
         )
         for r in reports
     ]
@@ -397,6 +402,10 @@ async def finalize_report(
         )
 
     report.status = new_status
+    if body.final_label:
+        report.final_label = body.final_label
+    if body.review_decision:
+        report.review_decision = body.review_decision
     await db.commit()
 
     # Apply reputation changes when we have enough data to do so

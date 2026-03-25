@@ -38,6 +38,9 @@ export interface Report {
   fileSize: number;
   submittedAt: string;
   updatedAt?: string;
+  // Decision labels from backend DB (populated by API responses)
+  reviewDecisionLabel?: string;  // 'REVIEW_PASSED' | 'NEEDS_EVIDENCE' | 'REJECT_SPAM'
+  finalLabel?: string;           // 'CORROBORATED' | 'NEEDS_EVIDENCE' | 'DISPUTED' | 'FALSE_OR_MANIPULATED'
   // On-chain fields (populated by enrichment in MySubmissions)
   onChainId?: number;
   reviewDecision?: number;    // 0=NONE, 1=NEEDS_EVIDENCE, 2=REVIEW_PASSED, 3=REJECT_SPAM

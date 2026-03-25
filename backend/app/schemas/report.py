@@ -82,6 +82,7 @@ class ReportListItem(BaseModel):
     # Only populated in the /all endpoint (reviewer/moderator access)
     reporter: Optional[str] = None
     review_decision: Optional[str] = None  # 'REVIEW_PASSED' | 'NEEDS_EVIDENCE' | 'REJECT_SPAM'
+    final_label: Optional[str] = None  # 'CORROBORATED' | 'NEEDS_EVIDENCE' | 'DISPUTED' | 'FALSE_OR_MANIPULATED'
 
     model_config = {"from_attributes": True}
 

@@ -32,6 +32,8 @@ export interface ApiReport {
     updated_at?: string;
     reviewed_at?: string;
     message?: string;
+    review_decision?: string;
+    final_label?: string;
 }
 
 const VALID_STATUSES = new Set<ReportStatus>([
@@ -93,6 +95,8 @@ export function mapApiReport(api: ApiReport): Report {
             api.created_at ??
             new Date().toISOString(),
         updatedAt: api.updated_at,
+        reviewDecisionLabel: api.review_decision,
+        finalLabel: api.final_label,
     };
 }
 

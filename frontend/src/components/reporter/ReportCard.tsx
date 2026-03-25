@@ -95,6 +95,17 @@ const categoryLabels: Record<ReportCategory, string> = {
   other: 'Other',
 };
 
+const decisionLabelConfig: Record<string, { label: string; color: string }> = {
+  // Moderator final labels
+  CORROBORATED: { label: 'Corroborated', color: 'bg-green-900/40 text-green-400 border-green-800/50' },
+  DISPUTED: { label: 'Disputed', color: 'bg-orange-900/40 text-orange-400 border-orange-800/50' },
+  NEEDS_EVIDENCE: { label: 'Needs Evidence', color: 'bg-amber-900/40 text-amber-400 border-amber-800/50' },
+  FALSE_OR_MANIPULATED: { label: 'False / Manipulated', color: 'bg-red-900/40 text-red-400 border-red-800/50' },
+  // Reviewer decisions
+  REVIEW_PASSED: { label: 'Review Passed', color: 'bg-blue-900/40 text-blue-400 border-blue-800/50' },
+  REJECT_SPAM: { label: 'Rejected (Spam)', color: 'bg-red-900/30 text-red-400 border-red-800/50' },
+};
+
 const visibilityConfig: Record<ReportVisibility, { label: string; icon: React.ElementType }> = {
   private: { label: 'Private', icon: EyeSlashIcon },
   moderated: { label: 'Moderated', icon: EyeIcon },
@@ -202,6 +213,17 @@ export const ReportCard = memo(function ReportCard({
               <VisibilityIcon className="h-3 w-3 mr-1" />
               {visibilityInfo.label}
             </span>
+            {/* Final decision label (moderator) or reviewer decision */}
+            {(report.finalLabel || report.reviewDecisionLabel) && (() => {
+              const key = report.finalLabel || report.reviewDecisionLabel || '';
+              const cfg = decisionLabelConfig[key];
+              if (!cfg) return null;
+              return (
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${cfg.color}`}>
+                  {cfg.label}
+                </span>
+              );
+            })()}
           </div>
 
           {/* Report ID/Title */}
