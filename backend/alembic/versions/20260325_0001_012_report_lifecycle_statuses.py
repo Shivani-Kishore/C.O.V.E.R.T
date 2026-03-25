@@ -22,18 +22,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # PostgreSQL requires ALTER TYPE ADD VALUE to run outside a transaction
-    # (or at minimum as its own statement before any DML uses the new value).
-    # Using autocommit_block ensures the enum values are committed and visible
-    # immediately, even on PostgreSQL < 14 or with asyncpg drivers.
-    conn = op.get_bind()
-    conn.execute(sa.text("COMMIT"))  # end Alembic's open transaction
-    conn.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'pending_review'"))
-    conn.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'needs_evidence'"))
-    conn.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'rejected_by_reviewer'"))
-    conn.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'pending_moderation'"))
-    conn.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'appealed'"))
-    conn.execute(sa.text("BEGIN"))  # re-open transaction so Alembic can stamp the version
+    # ALTER TYPE ADD VALUE must run outside a transaction (or the new values
+    # won't be visible on PostgreSQL < 14).  autocommit_block() temporarily
+    # commits, switches to AUTOCOMMIT, runs the DDL, then restores the
+    # previous transaction state so Alembic can stamp alembic_version.
+    with op.get_context().autocommit_block():
+        op.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'pending_review'"))
+        op.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'needs_evidence'"))
+        op.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'rejected_by_reviewer'"))
+        op.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'pending_moderation'"))
+        op.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'appealed'"))
 
 
 def downgrade() -> None:
