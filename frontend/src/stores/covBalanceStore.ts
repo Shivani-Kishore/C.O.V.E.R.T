@@ -82,10 +82,10 @@ export const useCovBalanceStore = create<CovBalanceState>()(
       addBalance: (address: string, amount: number) => {
         const key = address.toLowerCase();
         set((state) => {
-          const current =
-            state.balances[key] !== undefined
-              ? state.balances[key]
-              : INITIAL_BALANCE;
+          // Use 0 as the base when balance hasn't been set yet (not INITIAL_BALANCE)
+          // to prevent inflation when stake returns arrive before on-chain sync.
+          // getBalance() still shows INITIAL_BALANCE for display purposes.
+          const current = state.balances[key] ?? 0;
           return {
             balances: {
               ...state.balances,

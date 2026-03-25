@@ -11,6 +11,7 @@ Adds new status values to support the v2 report lifecycle:
   pending_moderation    – reviewer passed; awaiting moderator finalization
   appealed              – reporter appealed the reviewer decision
 """
+import sqlalchemy as sa
 from alembic import op
 
 
@@ -21,13 +22,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # PostgreSQL 12+ supports ALTER TYPE ADD VALUE inside a transaction.
-    # IF NOT EXISTS guards against re-running on a DB that already has the value.
-    op.execute("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'pending_review'")
-    op.execute("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'needs_evidence'")
-    op.execute("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'rejected_by_reviewer'")
-    op.execute("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'pending_moderation'")
-    op.execute("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'appealed'")
+    # PostgreSQL requires ALTER TYPE ADD VALUE to run outside a transaction
+    # (or at minimum as its own statement before any DML uses the new value).
+    # Using autocommit_block ensures the enum values are committed and visible
+    # immediately, even on PostgreSQL < 14 or with asyncpg drivers.
+    conn = op.get_bind()
+    conn.execute(sa.text("COMMIT"))  # end Alembic's open transaction
+    conn.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'pending_review'"))
+    conn.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'needs_evidence'"))
+    conn.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'rejected_by_reviewer'"))
+    conn.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'pending_moderation'"))
+    conn.execute(sa.text("ALTER TYPE reportstatus ADD VALUE IF NOT EXISTS 'appealed'"))
+    conn.execute(sa.text("BEGIN"))  # re-open transaction so Alembic can stamp the version
 
 
 def downgrade() -> None:

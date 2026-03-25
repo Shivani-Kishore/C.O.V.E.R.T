@@ -70,14 +70,26 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # Global exception handler — ensures unhandled 500s still return a proper
-# JSON response so the CORS middleware can attach its headers.
+# JSON response with CORS headers.
+# CORSMiddleware does NOT attach headers to exception responses in Starlette,
+# so we add them manually here.
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     import logging
-    logging.getLogger(__name__).error(f"Unhandled error on {request.url.path}: {exc}")
+    logging.getLogger(__name__).error(f"Unhandled error on {request.url.path}: {exc}", exc_info=True)
+
+    # Manually add CORS headers — CORSMiddleware skips exception responses
+    origin = request.headers.get("origin", "")
+    cors_headers: dict = {}
+    if origin and origin in settings.CORS_ORIGINS:
+        cors_headers["Access-Control-Allow-Origin"] = origin
+        cors_headers["Access-Control-Allow-Credentials"] = "true"
+        cors_headers["Vary"] = "Origin"
+
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},
+        headers=cors_headers,
     )
 
 
