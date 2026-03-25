@@ -35,7 +35,11 @@ export interface ApiReport {
 }
 
 const VALID_STATUSES = new Set<ReportStatus>([
-    'pending', 'under_review', 'verified', 'rejected', 'disputed',
+    // v2 lifecycle statuses
+    'pending_review', 'needs_evidence', 'rejected_by_reviewer',
+    'pending_moderation', 'appealed', 'verified', 'rejected', 'archived',
+    // Legacy statuses (backward compat)
+    'pending', 'under_review', 'disputed',
 ]);
 
 const VALID_VISIBILITIES = new Set<ReportVisibility>([
@@ -48,7 +52,7 @@ const VALID_CATEGORIES = new Set<ReportCategory>([
 
 function safeStatus(v: string | undefined): ReportStatus {
     if (v && VALID_STATUSES.has(v as ReportStatus)) return v as ReportStatus;
-    return 'pending';
+    return 'pending_review';
 }
 
 function safeVisibility(v: string | undefined): ReportVisibility {

@@ -138,7 +138,7 @@ class ReportService:
                 query = query.where(Report.status == status_enum)
 
             if category:
-                query = query.where(Report.category == category)
+                query = query.where(Report.encrypted_category == category)
 
             # Get total count
             count_query = select(func.count()).select_from(query.subquery())
@@ -313,9 +313,6 @@ class ReportService:
             old_status = report.status
             report.status = status
 
-            if status in [ReportStatus.VERIFIED, ReportStatus.REJECTED]:
-                report.reviewed_at = datetime.utcnow()
-
             # Create log entry
             log = ReportLog(
                 report_id=report.id,
@@ -376,13 +373,13 @@ class ReportService:
             query = select(Report).where(
                 and_(
                     Report.status == status,
-                    Report.visibility != 0,  # Not private
+                    Report.visibility != ReportVisibility.PRIVATE,
                     Report.deleted_at.is_(None)
                 )
             )
 
             if category:
-                query = query.where(Report.category == category)
+                query = query.where(Report.encrypted_category == category)
 
             # Get total count
             count_query = select(func.count()).select_from(query.subquery())
@@ -390,7 +387,7 @@ class ReportService:
             total = count_result.scalar() or 0
 
             # Order by oldest first
-            query = query.order_by(Report.submitted_at.asc())
+            query = query.order_by(Report.submission_timestamp.asc())
             query = query.limit(limit).offset(offset)
 
             result = await db.execute(query)

@@ -31,13 +31,21 @@ import { toast } from 'react-hot-toast';
 import { API_BASE } from '@/config';
 import { DepartmentRouting } from '@/components/DepartmentRouting';
 
-const statusConfig = {
-  pending:      { label: 'Pending',      color: 'bg-yellow-900/40 text-yellow-400', icon: ClockIcon },
-  under_review: { label: 'Under Review', color: 'bg-blue-900/40 text-blue-400',     icon: EyeIcon },
-  verified:     { label: 'Verified',     color: 'bg-green-900/40 text-green-400',   icon: CheckCircleIcon },
-  rejected:     { label: 'Rejected',     color: 'bg-red-900/40 text-red-400',       icon: XCircleIcon },
-  disputed:     { label: 'Disputed',     color: 'bg-orange-900/40 text-orange-400', icon: ExclamationTriangleIcon },
-} as const;
+const statusConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
+  // v2 lifecycle statuses
+  pending_review:       { label: 'Pending Review',        color: 'bg-yellow-900/40 text-yellow-400', icon: ClockIcon },
+  needs_evidence:       { label: 'Needs Evidence',        color: 'bg-amber-900/40 text-amber-400',   icon: ExclamationTriangleIcon },
+  rejected_by_reviewer: { label: 'Rejected by Reviewer',  color: 'bg-red-900/30 text-red-400',       icon: XCircleIcon },
+  pending_moderation:   { label: 'Under Moderation',      color: 'bg-blue-900/40 text-blue-400',     icon: EyeIcon },
+  appealed:             { label: 'Appealed',              color: 'bg-purple-900/40 text-purple-400', icon: ExclamationTriangleIcon },
+  verified:             { label: 'Verified',              color: 'bg-green-900/40 text-green-400',   icon: CheckCircleIcon },
+  rejected:             { label: 'Rejected',              color: 'bg-red-900/40 text-red-400',       icon: XCircleIcon },
+  archived:             { label: 'Archived',              color: 'bg-neutral-800 text-neutral-500',  icon: ClockIcon },
+  // Legacy statuses
+  pending:              { label: 'Pending',               color: 'bg-yellow-900/40 text-yellow-400', icon: ClockIcon },
+  under_review:         { label: 'Under Review',          color: 'bg-blue-900/40 text-blue-400',     icon: EyeIcon },
+  disputed:             { label: 'Disputed',              color: 'bg-orange-900/40 text-orange-400', icon: ExclamationTriangleIcon },
+};
 
 const categoryLabels: Record<string, string> = {
   corruption:  'Corruption',
