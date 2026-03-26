@@ -93,17 +93,21 @@ function AttachmentCard({ attachment }: { attachment: Attachment }) {
                 </button>
             </div>
 
-            {/* PDF open link */}
+            {/* PDF open link — use blob URL; browsers block data: URL navigation */}
             {isPDF && (
                 <div className="px-3 pb-3">
-                    <a
-                        href={dataUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                    <button
+                        onClick={() => {
+                            const bytes = Uint8Array.from(atob(attachment.content), c => c.charCodeAt(0));
+                            const blob = new Blob([bytes], { type: attachment.mimeType });
+                            const url = URL.createObjectURL(blob);
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                            setTimeout(() => URL.revokeObjectURL(url), 10000);
+                        }}
                         className="text-xs text-neutral-400 hover:text-white underline"
                     >
                         Open PDF in new tab
-                    </a>
+                    </button>
                 </div>
             )}
         </div>
