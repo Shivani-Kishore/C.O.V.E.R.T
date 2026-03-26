@@ -342,10 +342,12 @@ export function ReportSubmissionForm() {
           const keyHex = Array.from(encryptionKey)
             .map(b => b.toString(16).padStart(2, '0'))
             .join('');
+          const _ekToken = localStorage.getItem('token');
           await fetch(`${API_BASE}/api/v1/reports/by-hash/${cidHash}/evidence-key`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              ...(_ekToken ? { 'Authorization': `Bearer ${_ekToken}` } : {}),
               ...(walletState.address ? { 'X-Wallet-Address': walletState.address } : {}),
             },
             body: JSON.stringify({ key_hex: keyHex }),
