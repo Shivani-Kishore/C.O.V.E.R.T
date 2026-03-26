@@ -132,7 +132,10 @@ export function EvidenceViewer({ contentHash, cid, visibility }: EvidenceViewerP
 
         try {
             // 1. Fetch AES key from backend
-            const keyRes = await fetch(`${API_BASE}/api/v1/reports/by-hash/${contentHash}/evidence-key`);
+            const _evToken = localStorage.getItem('token');
+            const keyRes = await fetch(`${API_BASE}/api/v1/reports/by-hash/${contentHash}/evidence-key`, {
+                headers: _evToken ? { 'Authorization': `Bearer ${_evToken}` } : {},
+            });
             if (!keyRes.ok) {
                 const err = await keyRes.json().catch(() => ({ detail: 'No evidence key available' }));
                 throw new Error(err.detail ?? 'Failed to fetch evidence key');
